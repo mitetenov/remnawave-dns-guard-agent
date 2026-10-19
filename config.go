@@ -18,7 +18,7 @@ import (
 	"unicode/utf8"
 )
 
-const Version = "1.0.0"
+const Version = "1.1.0"
 const MaxJobs = 4
 const HeartbeatPath = "/tmp/dns-guard-agent-heartbeat"
 
@@ -33,18 +33,19 @@ var hexPattern = regexp.MustCompile(`^[a-fA-F0-9]*$`)
 var keyPattern = regexp.MustCompile(`^[A-Za-z0-9_-]{43}$`)
 
 type Profile struct {
-	Port        int    `json:"port"`
-	UUID        string `json:"uuid"`
-	Transport   string `json:"transport"`
-	Security    string `json:"security"`
-	ServerName  string `json:"server_name"`
-	PublicKey   string `json:"public_key"`
-	ShortID     string `json:"short_id"`
-	Flow        string `json:"flow"`
-	Fingerprint string `json:"fingerprint"`
-	Path        string `json:"path"`
-	Host        string `json:"host"`
-	XHTTPMode   string `json:"xhttp_mode"`
+	Port        int             `json:"port"`
+	UUID        string          `json:"uuid"`
+	Transport   string          `json:"transport"`
+	Security    string          `json:"security"`
+	ServerName  string          `json:"server_name"`
+	PublicKey   string          `json:"public_key"`
+	ShortID     string          `json:"short_id"`
+	Flow        string          `json:"flow"`
+	Fingerprint string          `json:"fingerprint"`
+	Path        string          `json:"path"`
+	Host        string          `json:"host"`
+	XHTTPMode   string          `json:"xhttp_mode"`
+	XHTTPExtra  json.RawMessage `json:"xhttp_extra,omitempty"`
 }
 
 func (p *Profile) UnmarshalJSON(data []byte) error {
@@ -152,6 +153,9 @@ func PublicAddress(ip netip.Addr) bool {
 
 func (j *Job) Validate() error {
 	p := &j.Profile
+	if !validXHTTPExtra(p.XHTTPExtra, p.Transport, p.XHTTPMode) {
+		return ErrInvalidJob
+	}
 	ip, err := netip.ParseAddr(j.IP)
 	if err != nil || !ip.Is4() || !PublicAddress(ip) || !identifierPattern.MatchString(j.JobID) || !identifierPattern.MatchString(j.TargetID) || j.TimeoutSeconds < 1 || j.TimeoutSeconds > 30 {
 		return ErrInvalidJob
@@ -287,7 +291,11 @@ func XrayConfig(job Job, port int) (map[string]any, error) {
 		stream["tlsSettings"] = map[string]any{"serverName": p.ServerName, "allowInsecure": false, "fingerprint": p.Fingerprint}
 	}
 	if p.Transport == "xhttp" {
-		stream["xhttpSettings"] = map[string]any{"path": p.Path, "host": p.Host, "mode": p.XHTTPMode}
+		settings := map[string]any{"path": p.Path, "host": p.Host, "mode": p.XHTTPMode}
+		if len(p.XHTTPExtra) != 0 {
+			settings["extra"] = p.XHTTPExtra
+		}
+		stream["xhttpSettings"] = settings
 	}
 	user := map[string]any{"id": p.UUID, "encryption": "none"}
 	if p.Flow != "" {

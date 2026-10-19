@@ -1,0 +1,158 @@
+{
+  "valid": [
+    {},
+    {
+      "xPaddingBytes": "100-1000",
+      "xPaddingObfsMode": true,
+      "xPaddingMethod": "tokenish",
+      "xPaddingPlacement": "queryInHeader",
+      "xPaddingKey": "padding",
+      "xPaddingHeader": "X-Padding",
+      "scMaxEachPostBytes": 1000000,
+      "scMinPostsIntervalMs": "10-30",
+      "scMaxBufferedPosts": 30,
+      "scStreamUpServerSecs": "20-80",
+      "headers": {
+        "User-Agent": "client%2Ftest",
+        "X-Token": "a+b%20c"
+      },
+      "xmux": {
+        "maxConcurrency": "16-32",
+        "maxConnections": 0,
+        "cMaxReuseTimes": 0,
+        "hMaxRequestTimes": "600-900",
+        "hMaxReusableSecs": "1800-3000",
+        "hKeepAlivePeriod": 30
+      }
+    },
+    {
+      "xPaddingBytes": "1000-100",
+      "xmux": {
+        "hMaxRequestTimes": "-1",
+        "hMaxReusableSecs": -1
+      },
+      "scMaxBufferedPosts": 0
+    },
+    {
+      "host": "ignored.example.com",
+      "path": "/ignored",
+      "mode": "ignored",
+      "headers": null,
+      "xmux": null,
+      "downloadSettings": null,
+      "noSSEHeader": true,
+      "uplinkDataPlacement": "body",
+      "sessionPlacement": "header",
+      "sessionKey": "X-Session",
+      "seqPlacement": "query",
+      "seqKey": "seq",
+      "uplinkDataKey": "data",
+      "uplinkChunkSize": 4096,
+      "uplinkHTTPMethod": "POST",
+      "serverMaxHeaderBytes": 16384
+    }
+  ],
+  "invalid": [
+    null,
+    [],
+    "{}",
+    {
+      "xPaddingBytes": "-1"
+    },
+    {
+      "xPaddingBytes": "0-100"
+    },
+    {
+      "xPaddingBytes": "bad"
+    },
+    {
+      "xPaddingBytes": 2147483648
+    },
+    {
+      "noGRPCHeader": "true"
+    },
+    {
+      "headers": {
+        "Host": "other.example.com"
+      }
+    },
+    {
+      "headers": {
+        "x-bad": "a\r\nHost: evil"
+      }
+    },
+    {
+      "headers": []
+    },
+    {
+      "headers": {
+        "x-bad": 42
+      }
+    },
+    {
+      "headers": {
+        "bad name": "v"
+      }
+    },
+    {
+      "xmux": {
+        "maxConcurrency": 16,
+        "maxConnections": 2
+      }
+    },
+    {
+      "xmux": {
+        "unknown": 1
+      }
+    },
+    {
+      "xmux": []
+    },
+    {
+      "scMaxBufferedPosts": 1.5
+    },
+    {
+      "serverMaxHeaderBytes": -1
+    },
+    {
+      "downloadSettings": {}
+    },
+    {
+      "downloadSettings": {
+        "address": "127.0.0.1",
+        "port": 80
+      }
+    },
+    {
+      "raw_config": {}
+    },
+    {
+      "extra": {
+        "downloadSettings": {}
+      }
+    },
+    {
+      "network": "tcp"
+    },
+    {
+      "address": "127.0.0.1"
+    },
+    {
+      "tlsSettings": {
+        "allowInsecure": true
+      }
+    },
+    {
+      "xPaddingPlacement": "bad"
+    },
+    {
+      "xPaddingMethod": "bad"
+    },
+    {
+      "uplinkDataPlacement": "cookie"
+    },
+    {
+      "uplinkHTTPMethod": "GET"
+    }
+  ]
+}
