@@ -76,6 +76,14 @@ Upgrade the agent before the backend/frontend; updated backends lease profiles
 with extra only to stable agents >=1.1.0. The offline self-test covers all eight
 XHTTP TLS/REALITY modes with padding, headers and xmux using the bundled Xray.
 
+Agent **1.2.0+** accepts optional TLS `alpn` as an ordered list and passes it
+to `tlsSettings.alpn`. Empty/missing lists keep Xray defaults. Protocol IDs are
+bounded printable ASCII strings; `fromMitm` and nonempty REALITY ALPN are rejected.
+Updated backends lease profiles with ALPN only to stable workers >=1.2.0.
+The offline self-test includes Firefox + XHTTP packet-up + GET/header upload
+extra + `h2,http/1.1`, matching the reported subscription shape with synthetic
+credentials and addresses. TLS certificate verification remains enabled.
+
 Xray configs are private temporary files (0600); each process is terminated and
 waited for, with forced kill fallback, before its config is deleted. Only
 enumerated reasons are logged/submitted; Xray stdout/stderr are suppressed.
