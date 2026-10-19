@@ -12,6 +12,9 @@ func TestXHTTPExtraWireAndConfig(t *testing.T) {
 	for _, security := range []string{"tls", "reality"} {
 		job := SyntheticJobs()[2]
 		job.Profile.Security = security
+		if security == "reality" {
+			job.Profile.ALPN = nil
+		}
 		job.Profile.Host = "edge.example.com"
 		job.Profile.Path = "/probe"
 		job.Profile.XHTTPExtra = json.RawMessage(`{"xPaddingBytes":"100-1000","noGRPCHeader":true,"headers":{"X-Token":"a+b%20c"},"xmux":{"maxConcurrency":"16-32"},"host":"ignored.example.com","path":"/ignored","mode":"ignored"}`)

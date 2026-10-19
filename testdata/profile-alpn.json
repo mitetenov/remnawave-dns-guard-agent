@@ -1,0 +1,91 @@
+{
+  "profile": {
+    "port": 443,
+    "uuid": "550e8400-e29b-41d4-a716-446655440000",
+    "transport": "xhttp",
+    "security": "tls",
+    "server_name": "edge.example.com",
+    "public_key": "",
+    "short_id": "",
+    "flow": "",
+    "fingerprint": "firefox",
+    "path": "/probe/",
+    "host": "edge.example.com",
+    "xhttp_mode": "packet-up",
+    "xhttp_extra": {
+      "xPaddingKey": "_dc",
+      "uplinkDataKey": "data",
+      "xPaddingHeader": "X-Cache",
+      "xPaddingMethod": "tokenish",
+      "uplinkHTTPMethod": "GET",
+      "xPaddingObfsMode": true,
+      "xPaddingPlacement": "queryInHeader",
+      "scMaxEachPostBytes": 32768,
+      "uplinkDataPlacement": "header",
+      "scMinPostsIntervalMs": 10,
+      "serverMaxHeaderBytes": 3932160
+    },
+    "alpn": [
+      "h2",
+      "http/1.1"
+    ]
+  },
+  "valid": [
+    [],
+    [
+      "h2"
+    ],
+    [
+      "h2",
+      "http/1.1"
+    ],
+    [
+      "http/1.1",
+      "h2"
+    ],
+    [
+      "h3"
+    ]
+  ],
+  "invalid": [
+    null,
+    "h2",
+    [
+      null
+    ],
+    [
+      true
+    ],
+    [
+      123
+    ],
+    [
+      ""
+    ],
+    [
+      "h2",
+      ""
+    ],
+    [
+      "h2,http/1.1"
+    ],
+    [
+      "h2\r\ninjected"
+    ],
+    [
+      " h2"
+    ],
+    [
+      "h2 "
+    ],
+    [
+      "\u044f"
+    ],
+    [
+      "fromMitm"
+    ],
+    [
+      "FROMMITM"
+    ]
+  ]
+}

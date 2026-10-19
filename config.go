@@ -18,7 +18,7 @@ import (
 	"unicode/utf8"
 )
 
-const Version = "1.1.0"
+const Version = "1.2.0"
 const MaxJobs = 4
 const HeartbeatPath = "/tmp/dns-guard-agent-heartbeat"
 
@@ -46,6 +46,7 @@ type Profile struct {
 	Host        string          `json:"host"`
 	XHTTPMode   string          `json:"xhttp_mode"`
 	XHTTPExtra  json.RawMessage `json:"xhttp_extra,omitempty"`
+	ALPN        []string        `json:"alpn,omitempty"`
 }
 
 func (p *Profile) UnmarshalJSON(data []byte) error {
@@ -153,6 +154,9 @@ func PublicAddress(ip netip.Addr) bool {
 
 func (j *Job) Validate() error {
 	p := &j.Profile
+	if !validALPN(p.ALPN, p.Security) {
+		return ErrInvalidJob
+	}
 	if !validXHTTPExtra(p.XHTTPExtra, p.Transport, p.XHTTPMode) {
 		return ErrInvalidJob
 	}
@@ -288,7 +292,11 @@ func XrayConfig(job Job, port int) (map[string]any, error) {
 	if p.Security == "reality" {
 		stream["realitySettings"] = map[string]any{"show": false, "serverName": p.ServerName, "fingerprint": p.Fingerprint, "password": p.PublicKey, "shortId": p.ShortID}
 	} else {
-		stream["tlsSettings"] = map[string]any{"serverName": p.ServerName, "allowInsecure": false, "fingerprint": p.Fingerprint}
+		settings := map[string]any{"serverName": p.ServerName, "allowInsecure": false, "fingerprint": p.Fingerprint}
+		if len(p.ALPN) > 0 {
+			settings["alpn"] = p.ALPN
+		}
+		stream["tlsSettings"] = settings
 	}
 	if p.Transport == "xhttp" {
 		settings := map[string]any{"path": p.Path, "host": p.Host, "mode": p.XHTTPMode}
