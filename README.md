@@ -66,6 +66,16 @@ key. TLS certificate verification stays enabled. XHTTP supports `auto`,
 TCP/RAW. UUID, public IPv4, port, SNI/host, REALITY key, short ID, fingerprint,
 path, and mode are validated. There is no raw configuration or command endpoint.
 
+Agent **1.1.0+** accepts optional `xhttp_extra` (a JSON object up to 16 KiB)
+and passes it unchanged to `xhttpSettings.extra`. Supported fields follow the
+pinned Xray v26.3.27 `SplitHTTPConfig`: padding/obfuscation, headers, upload/post
+parameters and xmux. Unknown fields and non-null `downloadSettings` are rejected:
+a separate download connection could bypass the job IP. Outer path/host/mode
+keep their upstream Xray precedence. Legacy profiles omit `xhttp_extra`.
+Upgrade the agent before the backend/frontend; updated backends lease profiles
+with extra only to stable agents >=1.1.0. The offline self-test covers all eight
+XHTTP TLS/REALITY modes with padding, headers and xmux using the bundled Xray.
+
 Xray configs are private temporary files (0600); each process is terminated and
 waited for, with forced kill fallback, before its config is deleted. Only
 enumerated reasons are logged/submitted; Xray stdout/stderr are suppressed.

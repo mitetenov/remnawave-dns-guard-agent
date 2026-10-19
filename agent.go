@@ -274,7 +274,11 @@ func SyntheticJobs() []Job {
 				if transport == "tcp" {
 					flow = "xtls-rprx-vision"
 				}
-				jobs = append(jobs, Job{JobID: "synthetic", TargetID: "synthetic", IP: "8.8.8.8", TimeoutSeconds: 15, Profile: Profile{Port: 443, UUID: "550e8400-e29b-41d4-a716-446655440000", Transport: transport, Security: security, ServerName: "example.com", PublicKey: "AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA", ShortID: "aabb", Flow: flow, Fingerprint: "chrome", Path: "/", XHTTPMode: mode}})
+				var extra json.RawMessage
+				if transport == "xhttp" {
+					extra = json.RawMessage(`{"xPaddingBytes":"100-1000","xPaddingObfsMode":true,"xPaddingMethod":"tokenish","xPaddingPlacement":"queryInHeader","noGRPCHeader":true,"scMaxEachPostBytes":1000000,"scMinPostsIntervalMs":"10-30","scMaxBufferedPosts":30,"scStreamUpServerSecs":"20-80","headers":{"User-Agent":"DNSGuard/SelfTest"},"xmux":{"maxConcurrency":"16-32","cMaxReuseTimes":0,"hMaxRequestTimes":"600-900","hMaxReusableSecs":"1800-3000","hKeepAlivePeriod":30}}`)
+				}
+				jobs = append(jobs, Job{JobID: "synthetic", TargetID: "synthetic", IP: "8.8.8.8", TimeoutSeconds: 15, Profile: Profile{Port: 443, UUID: "550e8400-e29b-41d4-a716-446655440000", Transport: transport, Security: security, ServerName: "example.com", PublicKey: "AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA", ShortID: "aabb", Flow: flow, Fingerprint: "chrome", Path: "/", XHTTPMode: mode, XHTTPExtra: extra}})
 			}
 		}
 	}
