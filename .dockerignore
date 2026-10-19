@@ -23,3 +23,7 @@
 backups
 data
 coverage
+**/*_test.go
+**/*.md
+tests
+scripts

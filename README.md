@@ -1,6 +1,6 @@
 # Remnawave DNS Guard RU agent
 
-Standalone worker for [DNS Guard backend](https://github.com/mitetenov/remnawave-dns-guard-backend).
+Standalone Go worker for [DNS Guard backend](https://github.com/mitetenov/remnawave-dns-guard-backend).
 The [frontend](https://github.com/mitetenov/remnawave-dns-guard-frontend) is maintained separately.
 
 ## Run with Docker Hub images
@@ -61,7 +61,7 @@ enumerated reasons are logged/submitted; Xray stdout/stderr are suppressed.
 Use Docker `init: true` for subprocess reaping. A read-only root filesystem is
 supported when `/tmp` is writable (e.g. a tmpfs); no persistent volume is needed.
 
-`python /app/probe_agent.py --healthcheck` verifies an authenticated backend poll
+`dns-guard-agent --healthcheck` verifies an authenticated backend poll
 completed within 180 seconds. This verifies worker progress; RU control-health
 status is reported separately in the backend/UI. The healthcheck never polls or
 leases extra jobs. Network failures are retried at the next polling interval.
@@ -71,25 +71,44 @@ leases extra jobs. Network failures are retried at the next polling interval.
 Build context is the repository root:
 
 ```sh
-docker build -t dns-guard-agent .
-python -m pip install -r requirements-dev.txt
-python -m pytest tests -q
+go test -race ./...
+go vet ./...
+CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -o dns-guard-agent ./cmd/agent
+docker build --platform linux/amd64 -t dns-guard-agent .
+docker run --rm --platform linux/amd64 --network none --read-only --tmpfs /tmp dns-guard-agent --self-test
 ```
 
-The multi-stage build downloads the official amd64 or arm64 Xray archive and
+Go 1.27.2 builds a static worker with no third-party Go dependencies. The
+multi-stage build downloads only the official Linux AMD64 Xray archive and
 checks the official `.dgst` SHA2-256 value before extracting only `xray`.
-Default `XRAY_VERSION=v26.3.27` was verified against the official latest stable
-release on 2026-10-14. Override with a deliberately reviewed release via
+The default is pinned to `XRAY_VERSION=v26.3.27`. Override with a deliberately reviewed release via
 `--build-arg XRAY_VERSION=v...`; prereleases are not selected automatically.
-The runtime stage executes `verify_xray.py` with the downloaded binary to check
+The runtime stage executes `dns-guard-agent --self-test` with the downloaded binary to check
 all ten synthetic transport/security/mode profiles using `xray run -test`.
 This parses configs only and does not dial the synthetic node.
 
-Local verification passed 17 mocked unit tests. Docker was unavailable in the
-development environment and the complete release download was blocked; actual
-Xray binary config validation and image build were therefore not run locally.
-The Docker build's self-test is a required executable check on a Docker-capable
-host. No live tunnel, Russian network, or DNS mutation was tested.
+The Alpine Go toolchain is shared with the backend build. Xray is downloaded in
+an independent stage containing only its downloader and the reviewed version;
+worker source changes reuse this stage. The stable Xray binary is copied before
+the worker in independent `COPY --link` layers. BuildKit caches Go compilation
+on the same builder, while CI exports ordinary layers with `type=gha,mode=max`;
+cache-mount contents themselves are not exported by that layer cache. Tests and
+documentation are excluded from the build context. Container self-test files
+live in a build-time tmpfs and do not enter the final image.
+
+The Go suite exercises the protocol through local HTTP servers, pinned HTTPS
+connections with certificate verification and SNI, malformed and oversized
+responses, control-outage result suppression, four-job concurrency, HTTPS
+through a real local CONNECT proxy, private config permissions, child-process
+termination and forced kill, heartbeat safety, and release checksums. The
+container self-test uses the actual pinned Xray executable; generated synthetic
+profiles validate configuration compatibility without contacting real nodes.
+The runtime starts from `scratch` and contains only the static worker, official
+static Xray executable, CA certificates, and writable temporary directory. It
+has no shell or package manager and runs as numeric UID/GID `10001:10001`.
+Production images, downloads, and Compose explicitly reject ARM64. Native
+developer builds can run on other hosts for local tests, but no ARM images are
+published. The agent has no Python runtime, package installer, UI, or listener.
 
 Official sources:
 
@@ -101,7 +120,7 @@ Official sources:
 
 ## CI
 
-Every push and pull request runs isolated Python tests, validates Compose, builds
+Every push and pull request runs Go tests and static checks, validates Compose, builds
 the Docker image, and checks ten generated profiles with the actual pinned Xray
 binary in a container with networking disabled. After these checks pass, `main`
 publishes `latest` and `sha-<full commit SHA>` to Docker Hub. Pull requests do not
@@ -109,4 +128,6 @@ publish images. CI does not deploy to an RU host or contact production nodes.
 
 Repository variables: `DOCKERHUB_USERNAME`, `DOCKERHUB_IMAGE`.
 Repository secret: `DOCKERHUB_TOKEN` with Read & Write permissions.
-Backend CI additionally checks the agent-to-backend protocol using this repository.
+Backend CI separately checks the same wire contract over HTTP. The optional
+Go-to-Go suite in the backend checkout accepts an explicit local Go agent source
+path; neither service needs the other repository as a runtime dependency.

@@ -24,3 +24,4 @@ coverage/
 .vite/
 *.tsbuildinfo
 .DS_Store
+/dns-guard-agent

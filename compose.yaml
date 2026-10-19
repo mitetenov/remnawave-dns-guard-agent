@@ -3,6 +3,7 @@ name: remnawave-dns-guard-agent
 services:
   agent:
     image: ${AGENT_IMAGE:-mitetenov/remnawave-dns-guard-agent:latest}
+    platform: linux/amd64
     restart: unless-stopped
     init: true
     environment:
@@ -14,7 +15,7 @@ services:
       PROBE_URLS: ${PROBE_URLS:-https://www.gstatic.com/generate_204,https://cp.cloudflare.com/generate_204}
       ALLOW_INSECURE_HTTP: ${ALLOW_INSECURE_HTTP:-false}
     healthcheck:
-      test: ["CMD", "python", "/app/probe_agent.py", "--healthcheck"]
+      test: ["CMD", "/usr/local/bin/dns-guard-agent", "--healthcheck"]
       interval: 30s
       timeout: 5s
       start_period: 45s
