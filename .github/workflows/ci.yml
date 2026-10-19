@@ -34,10 +34,16 @@ jobs:
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
       - name: Validate image-based Compose
-        env:
-          CONTROL_PLANE_URL: https://guard.example.test
-          AGENT_TOKEN: ci-only-agent-token-placeholder-000000000000
-        run: docker compose config --quiet
+        run: |
+          umask 077
+          cat > .env <<'EOF'
+          CONTROL_PLANE_URL=https://guard.example.test
+          AGENT_TOKEN=ci-only-agent-token-placeholder-000000000000
+          AGENT_ID=ci-agent
+          XRAY_BIN=/usr/local/bin/xray
+          ALLOW_INSECURE_HTTP=false
+          EOF
+          docker compose config --quiet
 
   image-check:
     runs-on: ubuntu-latest
