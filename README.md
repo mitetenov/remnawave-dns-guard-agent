@@ -5,8 +5,14 @@ The [frontend](https://github.com/mitetenov/remnawave-dns-guard-frontend) is mai
 
 ## Run with Docker Hub images
 
+For a new installation, download only `docker-compose.yaml` and `.env`:
+
 ```sh
-cp .env.example .env
+umask 077
+mkdir -p /opt/remnawave-dns-guard-agent
+cd /opt/remnawave-dns-guard-agent
+curl -fsSLo docker-compose.yaml https://raw.githubusercontent.com/mitetenov/remnawave-dns-guard-agent/main/docker-compose.yaml
+curl -fsSLo .env https://raw.githubusercontent.com/mitetenov/remnawave-dns-guard-agent/main/.env.example
 chmod 600 .env
 # Fill CONTROL_PLANE_URL and AGENT_TOKEN before starting.
 docker compose config --quiet
@@ -15,9 +21,14 @@ docker compose up -d
 docker compose logs --tail=100 agent
 ```
 
-Default image: `mitetenov/remnawave-dns-guard-agent:latest`. Set `AGENT_IMAGE`
-in `.env` to a `sha-<full commit SHA>` tag for reproducible deployment or rollback.
-The published image targets Linux AMD64.
+The Compose file uses `mitetenov/remnawave-dns-guard-agent:latest` directly.
+For reproducible deployment or rollback, replace the tag in `image:` with a
+`sha-<full commit SHA>` tag. The published image targets Linux AMD64.
+
+The worker loads settings through `env_file: .env`; the path is relative to
+`docker-compose.yaml`. Compose checks that the file exists, and the worker
+validates required values at startup. Preserve the existing `.env` when updating
+an installation instead of downloading the example over it.
 
 ## RU probe worker
 
@@ -58,8 +69,9 @@ path, and mode are validated. There is no raw configuration or command endpoint.
 Xray configs are private temporary files (0600); each process is terminated and
 waited for, with forced kill fallback, before its config is deleted. Only
 enumerated reasons are logged/submitted; Xray stdout/stderr are suppressed.
-Use Docker `init: true` for subprocess reaping. A read-only root filesystem is
-supported when `/tmp` is writable (e.g. a tmpfs); no persistent volume is needed.
+The worker handles SIGTERM/SIGINT and reaps its Xray child processes itself.
+A read-only root filesystem is supported when `/tmp` is writable (e.g. a tmpfs);
+no persistent volume is needed.
 
 `dns-guard-agent --healthcheck` verifies an authenticated backend poll
 completed within 180 seconds. This verifies worker progress; RU control-health
@@ -106,9 +118,9 @@ profiles validate configuration compatibility without contacting real nodes.
 The runtime starts from `scratch` and contains only the static worker, official
 static Xray executable, CA certificates, and writable temporary directory. It
 has no shell or package manager and runs as numeric UID/GID `10001:10001`.
-Production images, downloads, and Compose explicitly reject ARM64. Native
-developer builds can run on other hosts for local tests, but no ARM images are
-published. The agent has no Python runtime, package installer, UI, or listener.
+Production images and Xray downloads are AMD64-only. Native developer builds can
+run on other hosts for local tests, but no ARM images are published. The agent
+has no Python runtime, package installer, UI, or listener.
 
 Official sources:
 
