@@ -9,8 +9,10 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/http/httptrace"
 	"net/netip"
 	"net/url"
+	"sync/atomic"
 	"time"
 )
 
@@ -29,10 +31,12 @@ type DirectClient struct {
 	Resolver  AddressResolver
 	Dialer    ContextDialer
 	TLSConfig *tls.Config
+	// LogFailure may be called concurrently by the parallel control requests.
+	LogFailure func(RequestFailure)
 }
 
 func NewDirectClient() *DirectClient {
-	return &DirectClient{Resolver: net.DefaultResolver, Dialer: &net.Dialer{Timeout: 5 * time.Second}}
+	return &DirectClient{Resolver: net.DefaultResolver, Dialer: &net.Dialer{Timeout: 5 * time.Second}, LogFailure: logRequestFailure}
 }
 
 func (c *DirectClient) transport(allowPrivate bool) *http.Transport {
@@ -40,7 +44,7 @@ func (c *DirectClient) transport(allowPrivate bool) *http.Transport {
 		DialContext: func(ctx context.Context, network, address string) (net.Conn, error) {
 			host, port, err := net.SplitHostPort(address)
 			if err != nil {
-				return nil, errors.New("connection_failed")
+				return nil, &requestPhaseError{"tcp", err}
 			}
 			var addresses []netip.Addr
 			if literal, err := netip.ParseAddr(host); err == nil {
@@ -48,33 +52,47 @@ func (c *DirectClient) transport(allowPrivate bool) *http.Transport {
 			} else {
 				addresses, err = c.Resolver.LookupNetIP(ctx, "ip", host)
 				if err != nil {
-					return nil, errors.New("control_unreachable")
+					return nil, &requestPhaseError{"dns", err}
 				}
 			}
 			if len(addresses) == 0 {
-				return nil, errors.New("control_unreachable")
+				return nil, &requestPhaseError{"dns", errNoAddresses}
 			}
 			for _, ip := range addresses {
 				if !ip.IsValid() || (!allowPrivate && !PublicAddress(ip)) {
-					return nil, errors.New("control_unreachable")
+					return nil, &requestPhaseError{"address_policy", errBlockedAddress}
 				}
 			}
+			var lastError error
 			for _, ip := range addresses {
 				conn, err := c.Dialer.DialContext(ctx, "tcp", net.JoinHostPort(ip.String(), port))
 				if err == nil {
 					return conn, nil
 				}
+				lastError = err
 				if ctx.Err() != nil {
 					break
 				}
 			}
-			return nil, errors.New("connection_failed")
+			return nil, &requestPhaseError{"tcp", lastError}
 		}}
 }
 
 func noRedirect(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 
-func (c *DirectClient) Request(ctx context.Context, rawURL, method string, payload any, token string, allowPrivate bool) (map[string]json.RawMessage, bool, error) {
+func (c *DirectClient) Request(ctx context.Context, rawURL, method string, payload any, token string, allowPrivate bool) (result map[string]json.RawMessage, healthy bool, err error) {
+	started := time.Now()
+	diagnostic := RequestFailure{Event: "request_failed", Kind: "control", Method: method, URL: diagnosticURL(rawURL), Phase: "request", Reason: "invalid_request"}
+	if payload != nil {
+		diagnostic.Kind = "backend"
+	}
+	defer func() {
+		if c.LogFailure != nil && (err != nil || !healthy) {
+			diagnostic.Time = time.Now().UTC().Format(time.RFC3339Nano)
+			diagnostic.DurationMS = time.Since(started).Milliseconds()
+			c.LogFailure(diagnostic)
+		}
+	}()
 	var body io.Reader
 	if payload != nil {
 		encoded, err := json.Marshal(payload)
@@ -97,11 +115,27 @@ func (c *DirectClient) Request(ctx context.Context, rawURL, method string, paylo
 	transport := c.transport(allowPrivate)
 	defer transport.CloseIdleConnections()
 	client := &http.Client{Transport: transport, CheckRedirect: noRedirect, Timeout: 5 * time.Second}
-	response, err := client.Do(req)
-	if err != nil {
+	var phase atomic.Value
+	phase.Store("request")
+	req = req.WithContext(httptrace.WithClientTrace(req.Context(), &httptrace.ClientTrace{
+		DNSStart:          func(httptrace.DNSStartInfo) { phase.Store("dns") },
+		ConnectStart:      func(string, string) { phase.Store("tcp") },
+		TLSHandshakeStart: func() { phase.Store("tls") },
+		GotConn:           func(httptrace.GotConnInfo) { phase.Store("http") },
+	}))
+	response, requestErr := client.Do(req)
+	if requestErr != nil {
+		diagnostic.Phase = phase.Load().(string)
+		diagnostic.Reason = failureReason(requestErr)
+		var phaseError *requestPhaseError
+		if errors.As(requestErr, &phaseError) {
+			diagnostic.Phase = phaseError.phase
+		}
 		return nil, false, errors.New("backend_unreachable")
 	}
 	defer response.Body.Close()
+	diagnostic.HTTPStatus = response.StatusCode
+	diagnostic.Phase, diagnostic.Reason = "http", "status"
 	if payload == nil {
 		return nil, response.StatusCode >= 200 && response.StatusCode < 400, nil
 	}
@@ -109,11 +143,16 @@ func (c *DirectClient) Request(ctx context.Context, rawURL, method string, paylo
 		return nil, false, errors.New("backend_unreachable")
 	}
 	data, err := io.ReadAll(io.LimitReader(response.Body, maxResponseBytes+1))
-	if err != nil || len(data) > maxResponseBytes {
+	if err != nil {
+		diagnostic.Phase, diagnostic.Reason = "response", failureReason(err)
 		return nil, false, ErrBackendProtocol
 	}
-	var result map[string]json.RawMessage
+	if len(data) > maxResponseBytes {
+		diagnostic.Phase, diagnostic.Reason = "response", "too_large"
+		return nil, false, ErrBackendProtocol
+	}
 	if err := strictJSON(data, &result); err != nil || result == nil {
+		diagnostic.Phase, diagnostic.Reason = "response", "invalid_json"
 		return nil, false, ErrBackendProtocol
 	}
 	return result, true, nil

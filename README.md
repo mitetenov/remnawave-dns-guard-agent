@@ -86,7 +86,7 @@ credentials and addresses. TLS certificate verification remains enabled.
 
 Xray configs are private temporary files (0600); each process is terminated and
 waited for, with forced kill fallback, before its config is deleted. Only
-enumerated reasons are logged/submitted; Xray stdout/stderr are suppressed.
+enumerated reasons are submitted to the backend; Xray stdout/stderr are suppressed.
 The worker handles SIGTERM/SIGINT and reaps its Xray child processes itself.
 A read-only root filesystem is supported when `/tmp` is writable (e.g. a tmpfs);
 no persistent volume is needed.
@@ -95,6 +95,31 @@ no persistent volume is needed.
 completed within 180 seconds. This verifies worker progress; RU control-health
 status is reported separately in the backend/UI. The healthcheck never polls or
 leases extra jobs. Network failures are retried at the next polling interval.
+
+## Request failure logs
+
+Failed direct control checks and backend API requests emit one JSON record per
+request to the container log. Successful requests are quiet. A failed control
+is logged even when another control succeeds and the agent remains healthy.
+
+```json
+{"event":"request_failed","time":"2026-10-22T12:29:13Z","kind":"control","method":"GET","url":"https://ya.ru","duration_ms":5000,"phase":"dns","reason":"timeout"}
+```
+
+`kind` distinguishes `control` and `backend`; `phase` identifies DNS resolution,
+TCP connection, TLS handshake, HTTP response, response-body parsing, or address
+policy rejection. `reason` distinguishes timeouts, DNS lookup failures, refused
+or reset connections, certificate failures, and invalid backend responses.
+`http_status` is included when a response was received, for example 403 or 503.
+The logs omit URL credentials, query strings, fragments, headers, request/response
+bodies, and raw error text. Existing backend error codes and control-health
+decisions are unchanged.
+
+On the RU host, inspect failures with:
+
+```sh
+docker compose logs --timestamps --since 1h agent
+```
 
 ## Build and checks
 
