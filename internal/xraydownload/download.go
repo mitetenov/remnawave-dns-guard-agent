@@ -81,7 +81,7 @@ func Download(ctx context.Context, version, arch, destination string, fetch Fetc
 	}
 	actual := sha256.Sum256(archive)
 	if hex.EncodeToString(actual[:]) != expected {
-		return errors.New("Xray release checksum mismatch")
+		return errors.New("xray release checksum mismatch")
 	}
 	packageReader, err := zip.NewReader(bytes.NewReader(archive), int64(len(archive)))
 	if err != nil {
@@ -108,7 +108,7 @@ func Download(ctx context.Context, version, arch, destination string, fetch Fetc
 		}
 	}
 	if count != 1 {
-		return errors.New("Xray binary missing")
+		return errors.New("xray binary missing")
 	}
 	if err := os.MkdirAll(filepath.Dir(destination), 0755); err != nil {
 		return err
