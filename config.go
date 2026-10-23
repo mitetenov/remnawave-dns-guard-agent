@@ -224,7 +224,7 @@ func ParseURL(value string, allowHTTP, base bool) (*url.URL, error) {
 		return nil, ErrInvalidSettings
 	}
 	u, err := url.Parse(value)
-	if err != nil || (u.Scheme != "https" && !(allowHTTP && u.Scheme == "http")) || u.User != nil || u.Fragment != "" || !hostname(u.Hostname(), false) || u.Opaque != "" || (base && u.RawQuery != "") {
+	if err != nil || (u.Scheme != "https" && (!allowHTTP || u.Scheme != "http")) || u.User != nil || u.Fragment != "" || !hostname(u.Hostname(), false) || u.Opaque != "" || (base && u.RawQuery != "") {
 		return nil, ErrInvalidSettings
 	}
 	if u.Port() != "" {

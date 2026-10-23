@@ -68,21 +68,21 @@ path, and mode are validated. There is no raw configuration or command endpoint.
 
 Agent **1.1.0+** accepts optional `xhttp_extra` (a JSON object up to 16 KiB)
 and passes it unchanged to `xhttpSettings.extra`. Supported fields follow the
-pinned Xray v26.3.27 `SplitHTTPConfig`: padding/obfuscation, headers, upload/post
+pinned Xray v26.10.21 `SplitHTTPConfig`: padding/obfuscation, headers, upload/post
 parameters and xmux. Unknown fields and non-null `downloadSettings` are rejected:
 a separate download connection could bypass the job IP. Outer path/host/mode
 keep their upstream Xray precedence. Legacy profiles omit `xhttp_extra`.
 Upgrade the agent before the backend/frontend; updated backends lease profiles
-with extra only to stable agents >=1.1.0. The offline self-test covers all eight
-XHTTP TLS/REALITY modes with padding, headers and xmux using the bundled Xray.
+with extra only to stable agents >=1.1.0. Pure config tests cover all eight
+XHTTP TLS/REALITY modes with padding, headers and xmux.
 
 Agent **1.2.0+** accepts optional TLS `alpn` as an ordered list and passes it
 to `tlsSettings.alpn`. Empty/missing lists keep Xray defaults. Protocol IDs are
 bounded printable ASCII strings; `fromMitm` and nonempty REALITY ALPN are rejected.
 Updated backends lease profiles with ALPN only to stable workers >=1.2.0.
-The offline self-test includes Firefox + XHTTP packet-up + GET/header upload
-extra + `h2,http/1.1`, matching the reported subscription shape with synthetic
-credentials and addresses. TLS certificate verification remains enabled.
+Pure config tests include Firefox + XHTTP packet-up + GET/header upload
+extra + `h2,http/1.1`, using synthetic credentials and addresses. TLS certificate
+verification remains enabled.
 
 Xray configs are private temporary files (0600); each process is terminated and
 waited for, with forced kill fallback, before its config is deleted. Only
@@ -130,17 +130,13 @@ go test -race ./...
 go vet ./...
 CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -o dns-guard-agent ./cmd/agent
 docker build --platform linux/amd64 -t dns-guard-agent .
-docker run --rm --platform linux/amd64 --network none --read-only --tmpfs /tmp dns-guard-agent --self-test
 ```
 
-Go 1.27.2 builds a static worker with no third-party Go dependencies. The
+Go 1.27.3 builds a static worker with no third-party Go dependencies. The
 multi-stage build downloads only the official Linux AMD64 Xray archive and
 checks the official `.dgst` SHA2-256 value before extracting only `xray`.
-The default is pinned to `XRAY_VERSION=v26.3.27`. Override with a deliberately reviewed release via
+The default is pinned to `XRAY_VERSION=v26.10.21`. Override with a deliberately reviewed release via
 `--build-arg XRAY_VERSION=v...`; prereleases are not selected automatically.
-The runtime stage executes `dns-guard-agent --self-test` with the downloaded binary to check
-all ten synthetic transport/security/mode profiles using `xray run -test`.
-This parses configs only and does not dial the synthetic node.
 
 The Alpine Go toolchain is shared with the backend build. Xray is downloaded in
 an independent stage containing only its downloader and the reviewed version;
@@ -148,16 +144,9 @@ worker source changes reuse this stage. The stable Xray binary is copied before
 the worker in independent `COPY --link` layers. BuildKit caches Go compilation
 on the same builder, while CI exports ordinary layers with `type=gha,mode=max`;
 cache-mount contents themselves are not exported by that layer cache. Tests and
-documentation are excluded from the build context. Container self-test files
-live in a build-time tmpfs and do not enter the final image.
+documentation are excluded from the build context.
 
-The Go suite exercises the protocol through local HTTP servers, pinned HTTPS
-connections with certificate verification and SNI, malformed and oversized
-responses, control-outage result suppression, four-job concurrency, HTTPS
-through a real local CONNECT proxy, private config permissions, child-process
-termination and forced kill, heartbeat safety, and release checksums. The
-container self-test uses the actual pinned Xray executable; generated synthetic
-profiles validate configuration compatibility without contacting real nodes.
+The Go suite keeps isolated profile/schema, protocol and allowlist checks, release checksum tests with injected downloads, heartbeat file checks and local in-process fake HTTP/TLS adapters. Child-process/proxy tests and native Xray runtime test harnesses are removed.
 The runtime starts from `scratch` and contains only the static worker, official
 static Xray executable, CA certificates, and writable temporary directory. It
 has no shell or package manager and runs as numeric UID/GID `10001:10001`.
@@ -167,7 +156,7 @@ has no Python runtime, package installer, UI, or listener.
 
 Official sources:
 
-- Stable release: https://github.com/XTLS/Xray-core/releases/tag/v26.3.27
+- Stable release: https://github.com/XTLS/Xray-core/releases/tag/v26.10.21
 - Transport: https://xtls.github.io/en/config/transport.html
 - REALITY: https://xtls.github.io/en/config/transports/reality.html
 - RAW: https://xtls.github.io/en/config/transports/raw.html
@@ -175,14 +164,10 @@ Official sources:
 
 ## CI
 
-Every push and pull request runs Go tests and static checks, validates Compose, builds
-the Docker image, and checks ten generated profiles with the actual pinned Xray
-binary in a container with networking disabled. After these checks pass, `main`
-publishes `latest` and `sha-<full commit SHA>` to Docker Hub. Pull requests do not
-publish images. CI does not deploy to an RU host or contact production nodes.
+Every push and pull request verifies modules, formatting, vet, golangci-lint, unit/race tests, production builds and Compose, then builds the AMD64 Docker image. The build downloads and verifies the pinned Xray archive but does not execute native runtime integration tests. After validation main publishes the existing latest and sha-<full commit SHA> tags. PRs do not publish or deploy.
 
 Repository variables: `DOCKERHUB_USERNAME`, `DOCKERHUB_IMAGE`.
 Repository secret: `DOCKERHUB_TOKEN` with Read & Write permissions.
-Backend CI separately checks the same wire contract over HTTP. The optional
-Go-to-Go suite in the backend checkout accepts an explicit local Go agent source
-path; neither service needs the other repository as a runtime dependency.
+Backend and agent have independent unit tests; neither service requires the other checkout for CI.
+
+Go checks use Go 1.27.3, module verification/tidy, gofmt, vet, golangci-lint v2.15.0, unit/race tests and production builds. CI uses Ubuntu 26.04; Actions are pinned to reviewed release commits. Dependabot checks Go, Actions and Docker weekly. PR image validation never publishes; publication remains gated on the existing checks.

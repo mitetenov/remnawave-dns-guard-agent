@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-func sampleJob() Job { return SyntheticJobs()[1] }
+func sampleJob() Job { return syntheticJobs()[1] }
 func sampleSettings() Settings {
 	s := DefaultSettings()
 	s.ControlPlaneURL, s.Token = "https://guard.example.com", strings.Repeat("x", 32)
@@ -15,7 +15,7 @@ func sampleSettings() Settings {
 }
 
 func TestTenProfilesAndExactOutbound(t *testing.T) {
-	jobs := SyntheticJobs()
+	jobs := syntheticJobs()
 	if len(jobs) != 10 {
 		t.Fatalf("profiles=%d", len(jobs))
 	}

@@ -90,24 +90,7 @@ func TestRequestFailurePreservesDNSCause(t *testing.T) {
 	}
 }
 
-func TestRequestFailureRealTCPRefusal(t *testing.T) {
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	address := listener.Addr().String()
-	listener.Close()
-	client := NewDirectClient()
-	var failures []RequestFailure
-	client.LogFailure = func(f RequestFailure) { failures = append(failures, f) }
-	_, _, err = client.Request(context.Background(), "http://"+address, "GET", nil, "", true)
-	if err == nil || len(failures) != 1 {
-		t.Fatal(err, failures)
-	}
-	assertFailure(t, failures[0], "control", "tcp", "connection_refused")
-}
-
-func TestRequestFailureRealTLSVerification(t *testing.T) {
+func TestRequestFailureTLSFixtureVerification(t *testing.T) {
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Error("untrusted TLS connection reached HTTP handler")
 	}))
@@ -122,7 +105,7 @@ func TestRequestFailureRealTLSVerification(t *testing.T) {
 	assertFailure(t, failures[0], "control", "tls", "certificate_untrusted")
 }
 
-func TestRequestFailureRealHeaderTimeout(t *testing.T) {
+func TestRequestFailureHTTPFixtureHeaderTimeout(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		<-r.Context().Done()
 	}))

@@ -9,7 +9,7 @@ import (
 )
 
 func main() {
-	version := flag.String("version", "v26.3.27", "reviewed official Xray release")
+	version := flag.String("version", "v26.10.21", "reviewed official Xray release")
 	arch := flag.String("arch", "amd64", "only amd64 is supported")
 	destination := flag.String("destination", "/out/xray", "output executable")
 	flag.Parse()
