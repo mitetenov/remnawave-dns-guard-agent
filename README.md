@@ -73,16 +73,16 @@ parameters and xmux. Unknown fields and non-null `downloadSettings` are rejected
 a separate download connection could bypass the job IP. Outer path/host/mode
 keep their upstream Xray precedence. Legacy profiles omit `xhttp_extra`.
 Upgrade the agent before the backend/frontend; updated backends lease profiles
-with extra only to stable agents >=1.1.0. The offline self-test covers all eight
-XHTTP TLS/REALITY modes with padding, headers and xmux using the bundled Xray.
+with extra only to stable agents >=1.1.0. Pure config tests cover all eight
+XHTTP TLS/REALITY modes with padding, headers and xmux.
 
 Agent **1.2.0+** accepts optional TLS `alpn` as an ordered list and passes it
 to `tlsSettings.alpn`. Empty/missing lists keep Xray defaults. Protocol IDs are
 bounded printable ASCII strings; `fromMitm` and nonempty REALITY ALPN are rejected.
 Updated backends lease profiles with ALPN only to stable workers >=1.2.0.
-The offline self-test includes Firefox + XHTTP packet-up + GET/header upload
-extra + `h2,http/1.1`, matching the reported subscription shape with synthetic
-credentials and addresses. TLS certificate verification remains enabled.
+Pure config tests include Firefox + XHTTP packet-up + GET/header upload
+extra + `h2,http/1.1`, using synthetic credentials and addresses. TLS certificate
+verification remains enabled.
 
 Xray configs are private temporary files (0600); each process is terminated and
 waited for, with forced kill fallback, before its config is deleted. Only
@@ -130,7 +130,6 @@ go test -race ./...
 go vet ./...
 CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -o dns-guard-agent ./cmd/agent
 docker build --platform linux/amd64 -t dns-guard-agent .
-docker run --rm --platform linux/amd64 --network none --read-only --tmpfs /tmp dns-guard-agent --self-test
 ```
 
 Go 1.27.3 builds a static worker with no third-party Go dependencies. The
@@ -138,7 +137,6 @@ multi-stage build downloads only the official Linux AMD64 Xray archive and
 checks the official `.dgst` SHA2-256 value before extracting only `xray`.
 The default is pinned to `XRAY_VERSION=v26.10.21`. Override with a deliberately reviewed release via
 `--build-arg XRAY_VERSION=v...`; prereleases are not selected automatically.
-The `dns-guard-agent --self-test` command remains available for an explicit offline operator check of ten synthetic profiles with `xray run -test`; CI does not run native runtime integration tests.
 
 The Alpine Go toolchain is shared with the backend build. Xray is downloaded in
 an independent stage containing only its downloader and the reviewed version;
@@ -146,9 +144,9 @@ worker source changes reuse this stage. The stable Xray binary is copied before
 the worker in independent `COPY --link` layers. BuildKit caches Go compilation
 on the same builder, while CI exports ordinary layers with `type=gha,mode=max`;
 cache-mount contents themselves are not exported by that layer cache. Tests and
-documentation are excluded from the build context. The production image has no build-time runtime self-test.
+documentation are excluded from the build context.
 
-The Go suite keeps isolated profile/schema, protocol and allowlist checks, release checksum tests with injected downloads, heartbeat file checks and local in-process fake HTTP/TLS adapters. Child-process/proxy tests and native Xray runtime execution are removed from automated testing.
+The Go suite keeps isolated profile/schema, protocol and allowlist checks, release checksum tests with injected downloads, heartbeat file checks and local in-process fake HTTP/TLS adapters. Child-process/proxy tests and native Xray runtime test harnesses are removed.
 The runtime starts from `scratch` and contains only the static worker, official
 static Xray executable, CA certificates, and writable temporary directory. It
 has no shell or package manager and runs as numeric UID/GID `10001:10001`.

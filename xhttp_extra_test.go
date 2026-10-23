@@ -10,7 +10,7 @@ import (
 
 func TestXHTTPExtraWireAndConfig(t *testing.T) {
 	for _, security := range []string{"tls", "reality"} {
-		job := SyntheticJobs()[2]
+		job := syntheticJobs()[2]
 		job.Profile.Security = security
 		if security == "reality" {
 			job.Profile.ALPN = nil
@@ -71,7 +71,7 @@ func TestXHTTPExtraWireAndConfig(t *testing.T) {
 		}
 	}
 	// Invalid extra must fail at the job boundary, before Xray or network access.
-	job := SyntheticJobs()[2]
+	job := syntheticJobs()[2]
 	job.Profile.XHTTPExtra = json.RawMessage(`{"downloadSettings":{"address":"127.0.0.1"}}`)
 	wire, _ := json.Marshal([]Job{job})
 	if _, err := DecodeJobs(wire); err == nil {
