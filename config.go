@@ -13,12 +13,13 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"unicode"
 	"unicode/utf8"
 )
 
-const Version = "1.2.0"
+const Version = "1.4.0"
 const MaxJobs = 4
 const HeartbeatPath = "/tmp/dns-guard-agent-heartbeat"
 
@@ -69,11 +70,13 @@ func (p *Profile) UnmarshalJSON(data []byte) error {
 }
 
 type Job struct {
-	JobID          string  `json:"job_id"`
-	TargetID       string  `json:"target_id"`
-	IP             string  `json:"ip"`
-	Profile        Profile `json:"profile"`
-	TimeoutSeconds int     `json:"timeout_seconds"`
+	Routes         *RouteSelection `json:"routes,omitempty"`
+	ProxyURL       string          `json:"proxy_url,omitempty"`
+	JobID          string          `json:"job_id"`
+	TargetID       string          `json:"target_id"`
+	IP             string          `json:"ip"`
+	Profile        Profile         `json:"profile"`
+	TimeoutSeconds int             `json:"timeout_seconds"`
 }
 
 func strictJSON(data []byte, target any) error {
@@ -153,6 +156,14 @@ func PublicAddress(ip netip.Addr) bool {
 }
 
 func (j *Job) Validate() error {
+	if j.Routes != nil && (j.Routes.Revision < 0 || !j.Routes.Direct && !j.Routes.SOCKS5 || j.Routes.SOCKS5 != (j.ProxyURL != "")) {
+		return ErrInvalidJob
+	}
+	if j.ProxyURL != "" {
+		if _, err := parseProxyURL(j.ProxyURL); err != nil {
+			return ErrInvalidJob
+		}
+	}
 	p := &j.Profile
 	if !validALPN(p.ALPN, p.Security) {
 		return ErrInvalidJob
@@ -309,5 +320,17 @@ func XrayConfig(job Job, port int) (map[string]any, error) {
 	if p.Flow != "" {
 		user["flow"] = p.Flow
 	}
-	return map[string]any{"log": map[string]any{"loglevel": "none"}, "inbounds": []any{map[string]any{"tag": "probe-http", "listen": "127.0.0.1", "port": port, "protocol": "http", "settings": map[string]any{"allowTransparent": false}}}, "outbounds": []any{map[string]any{"tag": "target", "protocol": "vless", "settings": map[string]any{"vnext": []any{map[string]any{"address": job.IP, "port": p.Port, "users": []any{user}}}}, "streamSettings": stream}}}, nil
+	outbounds := []any{map[string]any{"tag": "target", "protocol": "vless", "settings": map[string]any{"vnext": []any{map[string]any{"address": job.IP, "port": p.Port, "users": []any{user}}}}, "streamSettings": stream}}
+	if job.ProxyURL != "" {
+		u, _ := parseProxyURL(job.ProxyURL)
+		proxyPort, _ := strconv.Atoi(u.Port())
+		settings := map[string]any{"address": u.Hostname(), "port": proxyPort}
+		if u.User != nil {
+			pass, _ := u.User.Password()
+			settings["user"], settings["pass"] = u.User.Username(), pass
+		}
+		stream["sockopt"] = map[string]any{"dialerProxy": "upstream-socks"}
+		outbounds = append(outbounds, map[string]any{"tag": "upstream-socks", "protocol": "socks", "settings": settings})
+	}
+	return map[string]any{"log": map[string]any{"loglevel": "none"}, "inbounds": []any{map[string]any{"tag": "probe-http", "listen": "127.0.0.1", "port": port, "protocol": "http", "settings": map[string]any{"allowTransparent": false}}}, "outbounds": outbounds}, nil
 }

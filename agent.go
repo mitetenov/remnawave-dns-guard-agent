@@ -17,10 +17,11 @@ import (
 )
 
 type Result struct {
-	JobID     string   `json:"job_id"`
-	OK        bool     `json:"ok"`
-	LatencyMS *float64 `json:"latency_ms"`
-	Error     *string  `json:"error"`
+	Routes    *RouteResults `json:"routes,omitempty"`
+	JobID     string        `json:"job_id"`
+	OK        bool          `json:"ok"`
+	LatencyMS *float64      `json:"latency_ms"`
+	Error     *string       `json:"error"`
 }
 
 type Agent struct {
@@ -31,6 +32,7 @@ type Agent struct {
 	// URL policy or introducing operator-controlled verification bypasses.
 	CheckControls   func(context.Context) bool
 	Probe           func(context.Context, Job) Result
+	CheckProxy      func(context.Context, string) ProxyStatus
 	LogReason       func(string)
 	tunnelTLSConfig *tls.Config
 }
@@ -41,6 +43,7 @@ func New(settings Settings) (*Agent, error) {
 	}
 	a := &Agent{Settings: settings, Client: NewDirectClient(), HeartbeatFile: HeartbeatPath, LogReason: func(reason string) { log.Print(reason) }}
 	a.CheckControls, a.Probe = a.controlHealth, a.probe
+	a.CheckProxy = a.checkProxy
 	return a, nil
 }
 
@@ -64,12 +67,39 @@ func (a *Agent) Cycle(ctx context.Context) (time.Duration, error) {
 			delay = max(1, min(60, parsed))
 		}
 	}
+	if _, exists := response["routes"]; exists {
+		return a.routedCycle(ctx, response, healthy, delay)
+	}
+	var proxy *ProxyConfig
+	if raw, ok := response["proxy"]; ok {
+		config, err := decodeProxyConfig(raw)
+		if err != nil {
+			return 0, err
+		}
+		proxy = &config
+		status := ProxyStatus{OK: true}
+		if config.URL != "" {
+			status = a.CheckProxy(ctx, config.URL)
+		}
+		if err := a.reportProxy(ctx, config, status); err != nil {
+			return 0, err
+		}
+		if !status.OK {
+			a.LogReason("proxy_unavailable_probing_paused")
+			return time.Duration(delay) * time.Second, nil
+		}
+	}
 	if !healthy {
 		return time.Duration(delay) * time.Second, nil
 	}
 	jobs, err := DecodeJobs(response["jobs"])
 	if err != nil {
 		return 0, err
+	}
+	for _, job := range jobs {
+		if proxy != nil && job.ProxyURL != proxy.URL {
+			return 0, ErrBackendProtocol
+		}
 	}
 	if len(jobs) == 0 {
 		return time.Duration(delay) * time.Second, nil
@@ -85,7 +115,17 @@ func (a *Agent) Cycle(ctx context.Context) (time.Duration, error) {
 	if ctx.Err() != nil {
 		return 0, ctx.Err()
 	}
-	if a.CheckControls(ctx) {
+	proxyOK := true
+	if proxy != nil && proxy.URL != "" {
+		status := a.CheckProxy(ctx, proxy.URL)
+		if err := a.reportProxy(ctx, *proxy, status); err != nil {
+			return 0, err
+		}
+		proxyOK = status.OK
+	}
+	if !proxyOK {
+		a.LogReason("proxy_unavailable_results_suppressed")
+	} else if a.CheckControls(ctx) {
 		_, err = a.api(ctx, "/api/agent/results", map[string]any{"agent_id": a.Settings.AgentID, "results": results})
 	} else {
 		poll["control_ok"], poll["control_error"] = false, "control_unreachable"

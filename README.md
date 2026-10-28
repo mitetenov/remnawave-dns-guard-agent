@@ -2,6 +2,7 @@
 
 Multiple checkers are supported by the backend. Every checker probes every enabled IP independently, including auto-excluded addresses. To add a node, deploy this agent with the existing `CONTROL_PLANE_URL` and shared `AGENT_TOKEN`, and a **unique, stable `AGENT_ID`** (for example `ru-spb-provider-2`). It registers automatically; no DNS Guard configuration or restart is needed. Never run independent nodes with the same default `ru-1` ID. Per-checker state and outcomes appear in the panel. Failure threshold on any healthy checker can exclude an IP; recovery requires the success threshold on every currently healthy connected checker. A disconnected checker does not itself count as a target failure. The existing wire protocol is unchanged.
 
+
 Standalone Go worker for [DNS Guard backend](https://github.com/mitetenov/remnawave-dns-guard-backend).
 The [frontend](https://github.com/mitetenov/remnawave-dns-guard-frontend) is maintained separately.
 
@@ -32,6 +33,23 @@ The worker loads settings through `env_file: .env`; the path is relative to
 validates required values at startup. Preserve the existing `.env` when updating
 an installation instead of downloading the example over it.
 
+## Независимые маршруты из панели
+
+Агент **1.4.0+** получает настройки на странице «Агенты → нужный агент». Два независимых переключателя:
+
+- **Напрямую:** агент → VLESS-нода → тестовый HTTPS-сайт.
+- **Через SOCKS5:** агент → SOCKS5 → VLESS-нода → тестовый HTTPS-сайт.
+
+Новый агент проверяет напрямую. В поле панели введите только `IP:PORT:LOGIN:PASS`, например `192.0.2.10:1080:login:password`, затем включите SOCKS5-маршрут. Форма сама преобразует ввод в SOCKS5 URL и экранирует специальные символы учётных данных. Перезапуск не нужен. Выключение маршрута сохраняет URL; удаление URL выключает только SOCKS5. Оба переключателя выключены — агент продолжает опрашивать панель без проб.
+
+Оба маршрута выполняют полноценные независимые Xray-пробы с сохранением TLS/REALITY/SNI/XHTTP/ALPN. Отказ VLESS в любом включённом маршруте проваливает общий чек. Сбой SOCKS5 пропускает только его результат: прямая проверка и её серия продолжают учитываться. Если нет достоверных результатов, чек неопределённый и не считается ни успехом, ни отказом ноды. DNS-решения принимаются по существующим порогам пула. В результатах IP панель показывает оба маршрута отдельно.
+
+Кнопка «Проверить прокси» проверяет аутентификацию и HTTPS с самого агента, включая при выключенных маршрутах. Ответ появляется после следующего poll (тайм-аут панели — 60 секунд). Панель показывает задержку и внешний IP, если доступен стандартный Cloudflare trace из CONTROL_URLS. Прокси также проверяется до/после его проб; прямой контроль проверяется отдельно. Возвращение прокси требует новых VLESS-результатов для восстановления DNS: старые пропущенные пробы не становятся успешными автоматически.
+
+Связь агента с панелью остаётся прямой, токен не передаётся прокси. SOCKS5 разрешает домены контрольных запросов удалённо. Приватный/локальный прокси должен быть доступен из контейнера агента (`127.0.0.1` — сам контейнер). При ротации IP разные соединения могут использовать разные выходы. Контрольный HTTPS не доказывает доступность конкретного IP/порта ноды: такая ошибка определяется как недоступность VLESS по выбранному маршруту.
+
+Сначала обновите агент до 1.4.0+, затем backend/frontend. Обновлённый агент со старым backend сохраняет прежний прямой протокол. Новые backends не разрешают включать SOCKS5 для старого агента. Смена маршрутов/URL отзывает старые задания и серии только этого агента. Одновременно запускаются не более четырёх Xray-процессов.
+
 ## RU probe worker
 
 Run on a Linux Docker host with a Russian egress connection. The worker polls
@@ -52,14 +70,17 @@ answers as public, connect to a validated address, and preserve certificate
 verification and SNI. No redirects are followed, and bearer tokens are sent
 only to the configured backend.
 
-Every batch checks direct controls before polling and again before posting
-results. At least one control must return 2xx/3xx. If the RU connection goes
-unhealthy, the worker updates the backend control heartbeat and discards that
-batch's results; leased jobs eventually expire without target failures. Target
+Direct-route batches check direct controls before polling and again before
+posting results. At least one control must return 2xx/3xx. If this connection
+goes unhealthy, direct results are skipped; independent SOCKS5 results remain
+usable. SOCKS5 health checks apply only to that route. If neither route has
+valid evidence, the result is inconclusive rather than a target failure. Target
 results are never submitted based solely on a tunnel-independent TCP connection.
 Each target must carry an HTTP(S) request through its exact IPv4 VLESS outbound.
 The backend heartbeat freshness is 90 seconds, and the normal bounded batch
-takes at most approximately 40 seconds after the initial heartbeat.
+takes at most approximately 40 seconds after the initial heartbeat without a
+proxy. SOCKS5 adds two bounded connectivity checks and reports; batches remain
+within the 90-second heartbeat freshness window.
 
 Supported profiles: VLESS over TCP/RAW or XHTTP, using TLS or REALITY. TCP maps to
 Xray `network: raw`; contract `public_key` maps to the current REALITY `password`
@@ -148,7 +169,7 @@ on the same builder, while CI exports ordinary layers with `type=gha,mode=max`;
 cache-mount contents themselves are not exported by that layer cache. Tests and
 documentation are excluded from the build context.
 
-The Go suite keeps isolated profile/schema, protocol and allowlist checks, release checksum tests with injected downloads, heartbeat file checks and local in-process fake HTTP/TLS adapters. Child-process/proxy tests and native Xray runtime test harnesses are removed.
+The Go suite keeps isolated profile/schema, protocol and allowlist checks, release checksum tests with injected downloads, heartbeat file checks and local in-process fake HTTP/TLS adapters. SOCKS5 tests use a local in-process proxy/TLS adapter to verify credentials, remote DNS and failed egress. Child-process and native Xray runtime test harnesses are not part of CI.
 The runtime starts from `scratch` and contains only the static worker, official
 static Xray executable, CA certificates, and writable temporary directory. It
 has no shell or package manager and runs as numeric UID/GID `10001:10001`.
