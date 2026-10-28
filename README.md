@@ -1,5 +1,7 @@
 # Remnawave DNS Guard RU agent
 
+Multiple checkers are supported by the backend. Every checker probes every enabled IP independently, including auto-excluded addresses. To add a node, deploy this agent with the existing `CONTROL_PLANE_URL` and shared `AGENT_TOKEN`, and a **unique, stable `AGENT_ID`** (for example `ru-spb-provider-2`). It registers automatically; no DNS Guard configuration or restart is needed. Never run independent nodes with the same default `ru-1` ID. Per-checker state and outcomes appear in the panel. Failure threshold on any healthy checker can exclude an IP; recovery requires the success threshold on every currently healthy connected checker. A disconnected checker does not itself count as a target failure. The existing wire protocol is unchanged.
+
 Standalone Go worker for [DNS Guard backend](https://github.com/mitetenov/remnawave-dns-guard-backend).
 The [frontend](https://github.com/mitetenov/remnawave-dns-guard-frontend) is maintained separately.
 
