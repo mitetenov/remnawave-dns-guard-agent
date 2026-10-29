@@ -19,7 +19,7 @@ import (
 	"unicode/utf8"
 )
 
-const Version = "1.4.0"
+const Version = "1.5.0"
 const MaxJobs = 4
 const HeartbeatPath = "/tmp/dns-guard-agent-heartbeat"
 
