@@ -67,6 +67,17 @@ func (a *Agent) Cycle(ctx context.Context) (time.Duration, error) {
 			delay = max(1, min(60, parsed))
 		}
 	}
+	if raw, ok := response["proxy_test"]; ok {
+		done := make(chan error, 1)
+		go func() { done <- a.runProxyTest(ctx, raw) }()
+		// Manual tests have their own transport and result endpoint. They must
+		// not postpone live VLESS result submission or discard direct evidence.
+		defer func() {
+			if err := <-done; err != nil {
+				a.LogReason("proxy_test_report_failed")
+			}
+		}()
+	}
 	if _, exists := response["routes"]; exists {
 		return a.routedCycle(ctx, response, healthy, delay)
 	}
