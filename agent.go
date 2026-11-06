@@ -65,6 +65,9 @@ func (a *Agent) Cycle(ctx context.Context) (time.Duration, error) {
 		var parsed int
 		if json.Unmarshal(value, &parsed) == nil && string(value) != "null" {
 			delay = max(1, min(60, parsed))
+			if parsed == 0 {
+				delay = 0
+			}
 		}
 	}
 	if raw, ok := response["proxy_test"]; ok {
@@ -97,11 +100,11 @@ func (a *Agent) Cycle(ctx context.Context) (time.Duration, error) {
 		}
 		if !status.OK {
 			a.LogReason("proxy_unavailable_probing_paused")
-			return time.Duration(delay) * time.Second, nil
+			return time.Duration(max(1, delay)) * time.Second, nil
 		}
 	}
 	if !healthy {
-		return time.Duration(delay) * time.Second, nil
+		return time.Duration(max(1, delay)) * time.Second, nil
 	}
 	jobs, err := DecodeJobs(response["jobs"])
 	if err != nil {
@@ -113,7 +116,7 @@ func (a *Agent) Cycle(ctx context.Context) (time.Duration, error) {
 		}
 	}
 	if len(jobs) == 0 {
-		return time.Duration(delay) * time.Second, nil
+		return time.Duration(max(1, delay)) * time.Second, nil
 	}
 	results := make([]Result, len(jobs))
 	done := make(chan int, len(jobs))
@@ -136,12 +139,14 @@ func (a *Agent) Cycle(ctx context.Context) (time.Duration, error) {
 	}
 	if !proxyOK {
 		a.LogReason("proxy_unavailable_results_suppressed")
+		delay = max(1, delay)
 	} else if a.CheckControls(ctx) {
 		_, err = a.api(ctx, "/api/agent/results", map[string]any{"agent_id": a.Settings.AgentID, "results": results})
 	} else {
 		poll["control_ok"], poll["control_error"] = false, "control_unreachable"
 		_, err = a.api(ctx, "/api/agent/poll", poll)
 		a.LogReason("control_unreachable_results_suppressed")
+		delay = max(1, delay)
 	}
 	return time.Duration(delay) * time.Second, err
 }
@@ -155,6 +160,9 @@ func (a *Agent) Run(ctx context.Context) {
 			}
 			a.LogReason("poll_cycle_failed")
 			delay = 10 * time.Second
+		}
+		if delay <= 0 {
+			continue
 		}
 		timer := time.NewTimer(delay)
 		select {

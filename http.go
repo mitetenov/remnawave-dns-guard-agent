@@ -63,19 +63,94 @@ func (c *DirectClient) transport(allowPrivate bool) *http.Transport {
 					return nil, &requestPhaseError{"address_policy", errBlockedAddress}
 				}
 			}
-			var lastError error
-			for _, ip := range addresses {
-				conn, err := c.Dialer.DialContext(ctx, "tcp", net.JoinHostPort(ip.String(), port))
-				if err == nil {
-					return conn, nil
-				}
-				lastError = err
-				if ctx.Err() != nil {
-					break
+			conn, err := c.dialAddresses(ctx, addresses, port)
+			if err != nil {
+				return nil, &requestPhaseError{"tcp", err}
+			}
+			return conn, nil
+		}}
+}
+
+// Race at most two validated addresses, alternating address families. The
+// delayed fallback leaves time for IPv4 when the first IPv6 route is blackholed.
+// Losing attempts are canceled and their connections are always closed.
+func (c *DirectClient) dialAddresses(parent context.Context, addresses []netip.Addr, port string) (net.Conn, error) {
+	if len(addresses) == 1 {
+		return c.Dialer.DialContext(parent, "tcp", net.JoinHostPort(addresses[0].String(), port))
+	}
+	var primary, fallback []netip.Addr
+	for _, ip := range addresses {
+		if ip.Is4() == addresses[0].Is4() {
+			primary = append(primary, ip)
+		} else {
+			fallback = append(fallback, ip)
+		}
+	}
+	ordered := make([]netip.Addr, 0, len(addresses))
+	for i := 0; i < max(len(primary), len(fallback)); i++ {
+		if i < len(primary) {
+			ordered = append(ordered, primary[i])
+		}
+		if i < len(fallback) {
+			ordered = append(ordered, fallback[i])
+		}
+	}
+	ctx, cancel := context.WithCancel(parent)
+	defer cancel()
+	finished := make(chan struct{})
+	defer close(finished)
+	type dialResult struct {
+		conn net.Conn
+		err  error
+	}
+	results := make(chan dialResult)
+	next, active := 0, 0
+	start := func() {
+		ip := ordered[next]
+		next++
+		active++
+		go func() {
+			conn, err := c.Dialer.DialContext(ctx, "tcp", net.JoinHostPort(ip.String(), port))
+			select {
+			case results <- dialResult{conn, err}:
+			case <-finished:
+				if conn != nil {
+					conn.Close()
 				}
 			}
-			return nil, &requestPhaseError{"tcp", lastError}
-		}}
+		}()
+	}
+	delay := 200 * time.Millisecond
+	if deadline, ok := parent.Deadline(); ok {
+		delay = min(delay, max(0, time.Until(deadline)/2))
+	}
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	start()
+	var lastError error
+	for active > 0 {
+		select {
+		case <-parent.Done():
+			return nil, parent.Err()
+		case result := <-results:
+			active--
+			if result.err == nil {
+				return result.conn, nil
+			}
+			if result.conn != nil {
+				result.conn.Close()
+			}
+			lastError = result.err
+			if next < len(ordered) {
+				start()
+			}
+		case <-timer.C:
+			if next < len(ordered) && active < 2 {
+				start()
+			}
+		}
+	}
+	return nil, lastError
 }
 
 func noRedirect(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
@@ -168,11 +243,12 @@ func (a *Agent) controlHealth(ctx context.Context) bool {
 			results <- healthy && err == nil
 		}(value)
 	}
-	healthy := false
 	for range a.Settings.ControlURLs {
-		healthy = <-results || healthy
+		if <-results {
+			return true
+		}
 	}
-	return healthy
+	return false
 }
 
 func (a *Agent) api(ctx context.Context, path string, body any) (map[string]json.RawMessage, error) {
