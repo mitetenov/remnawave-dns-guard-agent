@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"sync"
 	"time"
 )
 
@@ -75,24 +76,43 @@ func aggregateRouteResults(id string, routes *RouteResults) Result {
 	return result
 }
 
-// Routes run in separate phases, keeping the existing limit of four Xray
-// processes. Every phase completes before results or controls are inspected.
-func (a *Agent) probeRoute(ctx context.Context, jobs []Job, socks bool) []*RouteResult {
-	results := make([]*RouteResult, len(jobs))
-	done := make(chan struct{}, len(jobs))
+// Both routes share one bounded queue. A slow direct probe cannot prevent
+// idle workers from starting SOCKS5 probes; at most MaxJobs Xray processes run.
+func (a *Agent) probeRoutes(ctx context.Context, jobs []Job, routes RouteSelection, controlOK, proxyOK bool) []RouteResults {
+	results := make([]RouteResults, len(jobs))
+	tasks := make(chan func(), len(jobs)*2)
 	for i, job := range jobs {
-		go func(i int, job Job) {
-			job.Routes = nil
-			if !socks {
-				job.ProxyURL = ""
+		job.Routes = nil
+		if routes.Direct {
+			if controlOK {
+				direct := job
+				direct.ProxyURL = ""
+				tasks <- func() { results[i].Direct = routeResult(a.Probe(ctx, direct)) }
+			} else {
+				results[i].Direct = skippedRoute("control_unhealthy")
 			}
-			results[i] = routeResult(a.Probe(ctx, job))
-			done <- struct{}{}
-		}(i, job)
+		}
+		if routes.SOCKS5 {
+			if proxyOK {
+				tasks <- func() { results[i].SOCKS5 = routeResult(a.Probe(ctx, job)) }
+			} else {
+				results[i].SOCKS5 = skippedRoute("proxy_unavailable")
+			}
+		}
 	}
-	for range jobs {
-		<-done
+	close(tasks)
+	var workers sync.WaitGroup
+	for range min(MaxJobs, len(tasks)) {
+		workers.Go(func() {
+			for task := range tasks {
+				if ctx.Err() != nil {
+					return
+				}
+				task()
+			}
+		})
 	}
+	workers.Wait()
 	return results
 }
 
@@ -129,40 +149,20 @@ func (a *Agent) routedCycle(ctx context.Context, response map[string]json.RawMes
 		return 0, err
 	}
 	if len(jobs) == 0 {
-		return duration, nil
+		return time.Duration(max(1, delay)) * time.Second, nil
 	}
 	if !routes.Direct && !routes.SOCKS5 {
 		return 0, ErrBackendProtocol
 	}
-	results := make([]RouteResults, len(jobs))
-	if routes.Direct {
-		if controlOK {
-			values := a.probeRoute(ctx, jobs, false)
-			for i, value := range values {
-				results[i].Direct = value
-			}
-		} else {
-			for i := range results {
-				results[i].Direct = skippedRoute("control_unhealthy")
-			}
-		}
-	}
+	results := a.probeRoutes(ctx, jobs, routes, controlOK, status.OK)
 	if routes.SOCKS5 {
 		if status.OK {
-			values := a.probeRoute(ctx, jobs, true)
-			for i, value := range values {
-				results[i].SOCKS5 = value
-			}
 			status = a.CheckProxy(ctx, proxy.URL)
 			status.Checked = true
 			if !status.OK {
 				for i := range results {
 					results[i].SOCKS5 = skippedRoute("proxy_unavailable")
 				}
-			}
-		} else {
-			for i := range results {
-				results[i].SOCKS5 = skippedRoute("proxy_unavailable")
 			}
 		}
 	}

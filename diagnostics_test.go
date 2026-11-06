@@ -123,9 +123,17 @@ func TestRequestFailureHTTPFixtureHeaderTimeout(t *testing.T) {
 }
 
 func TestControlFailureLoggedEvenWhenOtherControlSucceeds(t *testing.T) {
+	failureLogged := make(chan struct{})
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/failed" {
 			w.WriteHeader(503)
+			return
+		}
+		// Complete the real failure before the successful control cancels
+		// unfinished alternatives. Its HTTP diagnostic must be preserved.
+		select {
+		case <-failureLogged:
+		case <-r.Context().Done():
 		}
 	}))
 	defer server.Close()
@@ -150,8 +158,13 @@ func TestControlFailureLoggedEvenWhenOtherControlSucceeds(t *testing.T) {
 		mu.Lock()
 		defer mu.Unlock()
 		failures = append(failures, f)
+		if f.URL == "https://example.com/failed" {
+			close(failureLogged)
+		}
 	}
-	if !agent.controlHealth(context.Background()) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if !agent.controlHealth(ctx) {
 		t.Fatal("one successful control must keep the agent healthy")
 	}
 	mu.Lock()

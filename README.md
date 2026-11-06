@@ -82,6 +82,14 @@ takes at most approximately 40 seconds after the initial heartbeat without a
 proxy. SOCKS5 adds two bounded connectivity checks and reports; batches remain
 within the 90-second heartbeat freshness window.
 
+Direct and SOCKS5 probes share a worker queue with a combined limit of four
+Xray processes. A slow probe on one route does not block idle workers from
+starting the other route. A zero `poll_after_seconds` hint refills completed
+batches immediately; idle or paused polls wait at least one second. Updated
+backends normally request a ten-second wait only when no jobs were issued.
+Direct connections alternate validated IPv6/IPv4 addresses with a bounded
+fallback race, so a blackholed first address cannot use the entire deadline.
+
 Supported profiles: VLESS over TCP/RAW or XHTTP, using TLS or REALITY. TCP maps to
 Xray `network: raw`; contract `public_key` maps to the current REALITY `password`
 key. TLS certificate verification stays enabled. XHTTP supports `auto`,
@@ -124,6 +132,8 @@ leases extra jobs. Network failures are retried at the next polling interval.
 Failed direct control checks and backend API requests emit one JSON record per
 request to the container log. Successful requests are quiet. A failed control
 is logged even when another control succeeds and the agent remains healthy.
+After the first successful control, unfinished alternatives are canceled;
+their diagnostics may report cancellation instead of a later timeout.
 
 ```json
 {"event":"request_failed","time":"2026-10-22T12:29:13Z","kind":"control","method":"GET","url":"https://ya.ru","duration_ms":5000,"phase":"dns","reason":"timeout"}
