@@ -16,6 +16,7 @@ func TestHysteriaWireAndExactOutbound(t *testing.T) {
 	for _, proxy := range []string{"", "socks5://login:password@127.0.0.1:1080"} {
 		job := hysteriaJob()
 		job.ProxyURL = proxy
+		job.Profile.Congestion = "bbr"
 		raw, _ := json.Marshal([]Job{job})
 		jobs, err := DecodeJobs(raw)
 		if err != nil {
@@ -36,7 +37,12 @@ func TestHysteriaWireAndExactOutbound(t *testing.T) {
 		if stream["network"] != "hysteria" || tls["serverName"] != job.Profile.ServerName || tls["allowInsecure"] != false || tls["pinnedPeerCertSha256"] != job.Profile.PinSHA256 || tls["fingerprint"] != nil || stream["hysteriaSettings"].(map[string]any)["auth"] != job.Profile.Password {
 			t.Fatal("incorrect Hysteria TLS/authentication settings")
 		}
-		mask := stream["finalmask"].(map[string]any)["udp"].([]any)[0].(map[string]any)
+		finalmask := stream["finalmask"].(map[string]any)
+		quic := finalmask["quicParams"].(map[string]any)
+		if quic["congestion"] != "bbr" {
+			t.Fatal("QUIC congestion setting was lost")
+		}
+		mask := finalmask["udp"].([]any)[0].(map[string]any)
 		if mask["type"] != "salamander" || mask["settings"].(map[string]any)["password"] != job.Profile.ObfsPassword {
 			t.Fatal("obfuscation password was lost")
 		}
@@ -58,6 +64,7 @@ func TestHysteriaRejectsInvalidProfiles(t *testing.T) {
 		"missing obfs password": func(j *Job) { j.Profile.ObfsPassword = "" },
 		"orphan obfs password":  func(j *Job) { j.Profile.Obfs = "" },
 		"invalid pin":           func(j *Job) { j.Profile.PinSHA256 = strings.Repeat("z", 64) },
+		"invalid congestion":    func(j *Job) { j.Profile.Congestion = "force-brutal" },
 		"wrong ALPN":            func(j *Job) { j.Profile.ALPN = []string{"h2"} },
 		"VLESS UUID":            func(j *Job) { j.Profile.UUID = sampleJob().Profile.UUID },
 		"XHTTP extra":           func(j *Job) { j.Profile.XHTTPExtra = json.RawMessage(`{}`) },

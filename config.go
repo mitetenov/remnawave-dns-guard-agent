@@ -19,7 +19,7 @@ import (
 	"unicode/utf8"
 )
 
-const Version = "1.6.0"
+const Version = "1.7.0"
 const MaxJobs = 4
 const HeartbeatPath = "/tmp/dns-guard-agent-heartbeat"
 
@@ -39,6 +39,7 @@ type Profile struct {
 	Obfs         string          `json:"obfs,omitempty"`
 	ObfsPassword string          `json:"obfs_password,omitempty"`
 	PinSHA256    string          `json:"pin_sha256,omitempty"`
+	Congestion   string          `json:"hysteria_congestion,omitempty"`
 	Port         int             `json:"port"`
 	UUID         string          `json:"uuid"`
 	Transport    string          `json:"transport"`
@@ -189,7 +190,7 @@ func (j *Job) Validate() error {
 		}
 		return nil
 	}
-	if !oneOf(p.Protocol, "", "vless") || p.Password != "" || p.Obfs != "" || p.ObfsPassword != "" || p.PinSHA256 != "" || !uuidPattern.MatchString(p.UUID) || !oneOf(p.Transport, "tcp", "xhttp") || !oneOf(p.Security, "tls", "reality") {
+	if !oneOf(p.Protocol, "", "vless") || p.Password != "" || p.Obfs != "" || p.ObfsPassword != "" || p.PinSHA256 != "" || p.Congestion != "" || !uuidPattern.MatchString(p.UUID) || !oneOf(p.Transport, "tcp", "xhttp") || !oneOf(p.Security, "tls", "reality") {
 		return ErrInvalidJob
 	}
 	uuid := strings.ToLower(strings.ReplaceAll(p.UUID, "-", ""))
