@@ -76,7 +76,7 @@ goes unhealthy, direct results are skipped; independent SOCKS5 results remain
 usable. SOCKS5 health checks apply only to that route. If neither route has
 valid evidence, the result is inconclusive rather than a target failure. Target
 results are never submitted based solely on a tunnel-independent TCP connection.
-Each target must carry an HTTP(S) request through its exact IPv4 VLESS outbound.
+Each target must carry an HTTP(S) request through its exact IPv4 VLESS or Hysteria2 outbound.
 The backend heartbeat freshness is 90 seconds, and the normal bounded batch
 takes at most approximately 40 seconds after the initial heartbeat without a
 proxy. SOCKS5 adds two bounded connectivity checks and reports; batches remain
@@ -90,7 +90,7 @@ backends normally request a ten-second wait only when no jobs were issued.
 Direct connections alternate validated IPv6/IPv4 addresses with a bounded
 fallback race, so a blackholed first address cannot use the entire deadline.
 
-Supported profiles: VLESS over TCP/RAW or XHTTP, using TLS or REALITY. TCP maps to
+Supported profiles: VLESS over TCP/RAW or XHTTP, using TLS or REALITY; Hysteria2 over UDP/QUIC with TLS. TCP maps to
 Xray `network: raw`; contract `public_key` maps to the current REALITY `password`
 key. TLS certificate verification stays enabled. XHTTP supports `auto`,
 `packet-up`, `stream-up`, and `stream-one`; Vision flow is supported only for
@@ -114,6 +114,26 @@ Updated backends lease profiles with ALPN only to stable workers >=1.2.0.
 Pure config tests include Firefox + XHTTP packet-up + GET/header upload
 extra + `h2,http/1.1`, using synthetic credentials and addresses. TLS certificate
 verification remains enabled.
+
+## Hysteria2
+
+Агент **1.6.0+** проверяет Hysteria2 через закреплённый Xray v26.10.21.
+Профиль использует `protocol: "hysteria2"`, `transport: "udp"`, `security: "tls"`,
+`port`, `server_name` и необязательный `password` (в том числе `логин:пароль`).
+Обфускация Salamander задаётся через `obfs: "salamander"` и `obfs_password`.
+Поле `pin_sha256` — SHA-256 сертификата из 64 hex-символов, если требуется
+закрепить сертификат. ALPN — `h3`. UUID, REALITY, flow и XHTTP для Hysteria2 не применяются.
+
+Пробы используют точный IPv4 задания; SNI и пароли сохраняются. Через SOCKS5
+требуется поддержка UDP ASSOCIATE и работающая передача UDP. HTTPS-проверка
+самого прокси подтверждает только TCP; она не гарантирует работу UDP.
+Для самоподписанного сертификата нужен SHA-256: закреплённый Xray не принимает
+отключение проверки через `insecure=1` без `pinSHA256`. Контрольные HTTPS-запросы
+агента и соединение с панелью сохраняют проверку сертификатов.
+
+Обновите все активные агенты до 1.6.0+, затем backend и frontend.
+Backend не выдаёт Hysteria2-задания старым агентам. Поля нового протокола
+не добавляются в VLESS-профили, поэтому прежние VLESS-пулы совместимы со старыми агентами.
 
 Xray configs are private temporary files (0600); each process is terminated and
 waited for, with forced kill fallback, before its config is deleted. Only

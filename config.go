@@ -19,7 +19,7 @@ import (
 	"unicode/utf8"
 )
 
-const Version = "1.5.0"
+const Version = "1.6.0"
 const MaxJobs = 4
 const HeartbeatPath = "/tmp/dns-guard-agent-heartbeat"
 
@@ -34,20 +34,25 @@ var hexPattern = regexp.MustCompile(`^[a-fA-F0-9]*$`)
 var keyPattern = regexp.MustCompile(`^[A-Za-z0-9_-]{43}$`)
 
 type Profile struct {
-	Port        int             `json:"port"`
-	UUID        string          `json:"uuid"`
-	Transport   string          `json:"transport"`
-	Security    string          `json:"security"`
-	ServerName  string          `json:"server_name"`
-	PublicKey   string          `json:"public_key"`
-	ShortID     string          `json:"short_id"`
-	Flow        string          `json:"flow"`
-	Fingerprint string          `json:"fingerprint"`
-	Path        string          `json:"path"`
-	Host        string          `json:"host"`
-	XHTTPMode   string          `json:"xhttp_mode"`
-	XHTTPExtra  json.RawMessage `json:"xhttp_extra,omitempty"`
-	ALPN        []string        `json:"alpn,omitempty"`
+	Protocol     string          `json:"protocol,omitempty"`
+	Password     string          `json:"password,omitempty"`
+	Obfs         string          `json:"obfs,omitempty"`
+	ObfsPassword string          `json:"obfs_password,omitempty"`
+	PinSHA256    string          `json:"pin_sha256,omitempty"`
+	Port         int             `json:"port"`
+	UUID         string          `json:"uuid"`
+	Transport    string          `json:"transport"`
+	Security     string          `json:"security"`
+	ServerName   string          `json:"server_name"`
+	PublicKey    string          `json:"public_key"`
+	ShortID      string          `json:"short_id"`
+	Flow         string          `json:"flow"`
+	Fingerprint  string          `json:"fingerprint"`
+	Path         string          `json:"path"`
+	Host         string          `json:"host"`
+	XHTTPMode    string          `json:"xhttp_mode"`
+	XHTTPExtra   json.RawMessage `json:"xhttp_extra,omitempty"`
+	ALPN         []string        `json:"alpn,omitempty"`
 }
 
 func (p *Profile) UnmarshalJSON(data []byte) error {
@@ -175,7 +180,16 @@ func (j *Job) Validate() error {
 	if err != nil || !ip.Is4() || !PublicAddress(ip) || !identifierPattern.MatchString(j.JobID) || !identifierPattern.MatchString(j.TargetID) || j.TimeoutSeconds < 1 || j.TimeoutSeconds > 30 {
 		return ErrInvalidJob
 	}
-	if p.Port < 1 || p.Port > 65535 || !uuidPattern.MatchString(p.UUID) || !oneOf(p.Transport, "tcp", "xhttp") || !oneOf(p.Security, "tls", "reality") {
+	if p.Port < 1 || p.Port > 65535 {
+		return ErrInvalidJob
+	}
+	if p.Protocol == "hysteria2" {
+		if !validHysteriaProfile(*p) {
+			return ErrInvalidJob
+		}
+		return nil
+	}
+	if !oneOf(p.Protocol, "", "vless") || p.Password != "" || p.Obfs != "" || p.ObfsPassword != "" || p.PinSHA256 != "" || !uuidPattern.MatchString(p.UUID) || !oneOf(p.Transport, "tcp", "xhttp") || !oneOf(p.Security, "tls", "reality") {
 		return ErrInvalidJob
 	}
 	uuid := strings.ToLower(strings.ReplaceAll(p.UUID, "-", ""))
@@ -295,6 +309,9 @@ func XrayConfig(job Job, port int) (map[string]any, error) {
 		return nil, ErrInvalidJob
 	}
 	p := job.Profile
+	if p.Protocol == "hysteria2" {
+		return hysteriaConfig(job, port), nil
+	}
 	network := "raw"
 	if p.Transport == "xhttp" {
 		network = "xhttp"
