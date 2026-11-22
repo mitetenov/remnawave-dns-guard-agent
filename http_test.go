@@ -124,7 +124,12 @@ func TestAgentReusesOnlyThePanelConnection(t *testing.T) {
 	if resolves.Load() != 1 || dials.Load() != 1 {
 		t.Fatalf("panel used %d DNS queries and %d dials, want 1 each", resolves.Load(), dials.Load())
 	}
-	if !a.controlHealth(ctx) || !a.controlHealth(ctx) || resolves.Load() != 3 || dials.Load() != 3 {
+	for attempt := 1; attempt <= 2; attempt++ {
+		if !a.controlHealth(ctx) {
+			t.Fatalf("control check %d failed", attempt)
+		}
+	}
+	if resolves.Load() != 3 || dials.Load() != 3 {
 		t.Fatalf("control checks used %d total DNS queries and %d dials, want 3 each", resolves.Load(), dials.Load())
 	}
 
