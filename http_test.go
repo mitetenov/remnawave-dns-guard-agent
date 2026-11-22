@@ -78,6 +78,96 @@ func TestPinnedHTTPSPreservesSNIHostAndAuth(t *testing.T) {
 	}
 }
 
+func TestAgentReusesOnlyThePanelConnection(t *testing.T) {
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if auth := r.Header.Get("Authorization"); (r.Method == http.MethodPost) != (auth != "") {
+			t.Error("incorrect authorization on panel or health request")
+		}
+		fmt.Fprint(w, `{}`)
+	}))
+	defer server.Close()
+	s := sampleSettings()
+	s.ControlPlaneURL = "https://example.com"
+	s.ControlURLs = []string{s.ControlPlaneURL}
+	a, err := New(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.panel.closeIdle()
+	roots := x509.NewCertPool()
+	roots.AddCert(server.Certificate())
+	a.Client.TLSConfig = &tls.Config{RootCAs: roots}
+	a.Client.LogFailure = nil
+	var resolves, dials atomic.Int32
+	var blocked atomic.Bool
+	a.Client.Resolver = resolverFunc(func(context.Context, string, string) ([]netip.Addr, error) {
+		resolves.Add(1)
+		addresses := []netip.Addr{netip.MustParseAddr("8.8.8.8")}
+		if blocked.Load() {
+			addresses = append(addresses, netip.MustParseAddr("::1"))
+		}
+		return addresses, nil
+	})
+	a.Client.Dialer = dialerFunc(func(ctx context.Context, network, address string) (net.Conn, error) {
+		dials.Add(1)
+		if address != "8.8.8.8:443" {
+			t.Errorf("unexpected address %s", address)
+		}
+		return (&net.Dialer{}).DialContext(ctx, network, server.Listener.Addr().String())
+	})
+	ctx := context.Background()
+	for _, path := range []string{"/api/agent/poll", "/api/agent/results"} {
+		if _, err := a.api(ctx, path, struct{}{}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if resolves.Load() != 1 || dials.Load() != 1 {
+		t.Fatalf("panel used %d DNS queries and %d dials, want 1 each", resolves.Load(), dials.Load())
+	}
+	for attempt := 1; attempt <= 2; attempt++ {
+		if !a.controlHealth(ctx) {
+			t.Fatalf("control check %d failed", attempt)
+		}
+	}
+	if resolves.Load() != 3 || dials.Load() != 3 {
+		t.Fatalf("control checks used %d total DNS queries and %d dials, want 3 each", resolves.Load(), dials.Load())
+	}
+
+	stopped, cancel := context.WithCancel(ctx)
+	cancel()
+	a.Run(stopped)
+	blocked.Store(true)
+	if _, err := a.api(ctx, "/api/agent/poll", struct{}{}); err == nil || resolves.Load() != 4 || dials.Load() != 3 {
+		t.Fatalf("after shutdown got error %v, %d DNS queries and %d dials", err, resolves.Load(), dials.Load())
+	}
+}
+
+func TestPanelConnectionUsesCurrentPrivateAddressPolicy(t *testing.T) {
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `{}`)
+	}))
+	defer server.Close()
+	s := sampleSettings()
+	s.ControlPlaneURL = server.URL
+	s.AllowInsecureHTTP = true
+	a, err := New(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.panel.closeIdle()
+	roots := x509.NewCertPool()
+	roots.AddCert(server.Certificate())
+	a.Client.TLSConfig = &tls.Config{RootCAs: roots}
+	a.Client.LogFailure = nil
+	if _, err := a.api(context.Background(), "/api/agent/poll", struct{}{}); err != nil {
+		t.Fatal(err)
+	}
+	a.Settings.AllowInsecureHTTP = false
+	if _, err := a.api(context.Background(), "/api/agent/poll", struct{}{}); err == nil {
+		t.Fatal("restrictive panel policy used a connection to a private address")
+	}
+}
+
 func TestBackendRedirectAndBodyLimits(t *testing.T) {
 	var leaked atomic.Int32
 	other := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { leaked.Add(1) }))
