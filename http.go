@@ -12,6 +12,7 @@ import (
 	"net/http/httptrace"
 	"net/netip"
 	"net/url"
+	"sync"
 	"sync/atomic"
 	"time"
 )
@@ -39,8 +40,9 @@ func NewDirectClient() *DirectClient {
 	return &DirectClient{Resolver: net.DefaultResolver, Dialer: &net.Dialer{Timeout: 5 * time.Second}, LogFailure: logRequestFailure}
 }
 
-func (c *DirectClient) transport(allowPrivate bool) *http.Transport {
-	return &http.Transport{Proxy: nil, DisableKeepAlives: true, TLSClientConfig: c.TLSConfig, TLSHandshakeTimeout: 5 * time.Second, ResponseHeaderTimeout: 5 * time.Second,
+func (c *DirectClient) httpClient(allowPrivate, keepAlive bool) *http.Client {
+	transport := &http.Transport{Proxy: nil, DisableKeepAlives: !keepAlive, TLSClientConfig: c.TLSConfig, TLSHandshakeTimeout: 5 * time.Second, ResponseHeaderTimeout: 5 * time.Second,
+		MaxIdleConns: 2, IdleConnTimeout: 75 * time.Second,
 		DialContext: func(ctx context.Context, network, address string) (net.Conn, error) {
 			host, port, err := net.SplitHostPort(address)
 			if err != nil {
@@ -69,6 +71,7 @@ func (c *DirectClient) transport(allowPrivate bool) *http.Transport {
 			}
 			return conn, nil
 		}}
+	return &http.Client{Transport: transport, CheckRedirect: noRedirect, Timeout: 5 * time.Second}
 }
 
 // Race at most two validated addresses, alternating address families. The
@@ -156,6 +159,12 @@ func (c *DirectClient) dialAddresses(parent context.Context, addresses []netip.A
 func noRedirect(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 
 func (c *DirectClient) Request(ctx context.Context, rawURL, method string, payload any, token string, allowPrivate bool) (result map[string]json.RawMessage, healthy bool, err error) {
+	client := c.httpClient(allowPrivate, false)
+	defer client.CloseIdleConnections()
+	return c.request(ctx, client, rawURL, method, payload, token)
+}
+
+func (c *DirectClient) request(ctx context.Context, client *http.Client, rawURL, method string, payload any, token string) (result map[string]json.RawMessage, healthy bool, err error) {
 	started := time.Now()
 	diagnostic := RequestFailure{Event: "request_failed", Kind: "control", Method: method, URL: diagnosticURL(rawURL), Phase: "request", Reason: "invalid_request"}
 	if payload != nil {
@@ -187,9 +196,6 @@ func (c *DirectClient) Request(ctx context.Context, rawURL, method string, paylo
 	if token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
 	}
-	transport := c.transport(allowPrivate)
-	defer transport.CloseIdleConnections()
-	client := &http.Client{Transport: transport, CheckRedirect: noRedirect, Timeout: 5 * time.Second}
 	var phase atomic.Value
 	phase.Store("request")
 	req = req.WithContext(httptrace.WithClientTrace(req.Context(), &httptrace.ClientTrace{
@@ -251,6 +257,42 @@ func (a *Agent) controlHealth(ctx context.Context) bool {
 	return false
 }
 
+type panelOrigin struct {
+	direct       *DirectClient
+	tlsConfig    *tls.Config
+	scheme, host string
+	allowPrivate bool
+}
+
+type panelConnection struct {
+	mu     sync.Mutex
+	origin panelOrigin
+	client *http.Client
+}
+
+func (p *panelConnection) httpClient(direct *DirectClient, u *url.URL, allowPrivate bool) *http.Client {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	origin := panelOrigin{direct: direct, tlsConfig: direct.TLSConfig, scheme: u.Scheme, host: u.Host, allowPrivate: allowPrivate}
+	if p.client == nil || p.origin != origin {
+		if p.client != nil {
+			p.client.CloseIdleConnections()
+		}
+		p.client = direct.httpClient(allowPrivate, true)
+		p.origin = origin
+	}
+	return p.client
+}
+
+func (p *panelConnection) closeIdle() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.client != nil {
+		p.client.CloseIdleConnections()
+		p.client = nil
+	}
+}
+
 func (a *Agent) api(ctx context.Context, path string, body any) (map[string]json.RawMessage, error) {
 	u, err := ParseURL(a.Settings.ControlPlaneURL, a.Settings.AllowInsecureHTTP, true)
 	if err != nil {
@@ -260,7 +302,8 @@ func (a *Agent) api(ctx context.Context, path string, body any) (map[string]json
 	u.RawPath = ""
 	ctx, cancel := context.WithTimeout(ctx, 12*time.Second)
 	defer cancel()
-	result, _, err := a.Client.Request(ctx, u.String(), "POST", body, a.Settings.Token, a.Settings.AllowInsecureHTTP)
+	client := a.panel.httpClient(a.Client, u, a.Settings.AllowInsecureHTTP)
+	result, _, err := a.Client.request(ctx, client, u.String(), "POST", body, a.Settings.Token)
 	return result, err
 }
 

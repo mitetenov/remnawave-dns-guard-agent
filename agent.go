@@ -35,6 +35,7 @@ type Agent struct {
 	CheckProxy      func(context.Context, string) ProxyStatus
 	LogReason       func(string)
 	tunnelTLSConfig *tls.Config
+	panel           panelConnection
 }
 
 func New(settings Settings) (*Agent, error) {
@@ -152,6 +153,7 @@ func (a *Agent) Cycle(ctx context.Context) (time.Duration, error) {
 }
 
 func (a *Agent) Run(ctx context.Context) {
+	defer a.panel.closeIdle()
 	for ctx.Err() == nil {
 		delay, err := a.Cycle(ctx)
 		if err != nil {
