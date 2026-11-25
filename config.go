@@ -19,7 +19,7 @@ import (
 	"unicode/utf8"
 )
 
-const Version = "1.7.0"
+const Version = "1.8.0"
 const MaxJobs = 4
 const HeartbeatPath = "/tmp/dns-guard-agent-heartbeat"
 
@@ -34,26 +34,27 @@ var hexPattern = regexp.MustCompile(`^[a-fA-F0-9]*$`)
 var keyPattern = regexp.MustCompile(`^[A-Za-z0-9_-]{43}$`)
 
 type Profile struct {
-	Protocol     string          `json:"protocol,omitempty"`
-	Password     string          `json:"password,omitempty"`
-	Obfs         string          `json:"obfs,omitempty"`
-	ObfsPassword string          `json:"obfs_password,omitempty"`
-	PinSHA256    string          `json:"pin_sha256,omitempty"`
-	Congestion   string          `json:"hysteria_congestion,omitempty"`
-	Port         int             `json:"port"`
-	UUID         string          `json:"uuid"`
-	Transport    string          `json:"transport"`
-	Security     string          `json:"security"`
-	ServerName   string          `json:"server_name"`
-	PublicKey    string          `json:"public_key"`
-	ShortID      string          `json:"short_id"`
-	Flow         string          `json:"flow"`
-	Fingerprint  string          `json:"fingerprint"`
-	Path         string          `json:"path"`
-	Host         string          `json:"host"`
-	XHTTPMode    string          `json:"xhttp_mode"`
-	XHTTPExtra   json.RawMessage `json:"xhttp_extra,omitempty"`
-	ALPN         []string        `json:"alpn,omitempty"`
+	Protocol      string            `json:"protocol,omitempty"`
+	Password      string            `json:"password,omitempty"`
+	Obfs          string            `json:"obfs,omitempty"`
+	ObfsPassword  string            `json:"obfs_password,omitempty"`
+	PinSHA256     string            `json:"pin_sha256,omitempty"`
+	Congestion    string            `json:"hysteria_congestion,omitempty"`
+	Port          int               `json:"port"`
+	UUID          string            `json:"uuid"`
+	Transport     string            `json:"transport"`
+	Security      string            `json:"security"`
+	ServerName    string            `json:"server_name"`
+	PublicKey     string            `json:"public_key"`
+	ShortID       string            `json:"short_id"`
+	Flow          string            `json:"flow"`
+	Fingerprint   string            `json:"fingerprint"`
+	Path          string            `json:"path"`
+	Host          string            `json:"host"`
+	XHTTPMode     string            `json:"xhttp_mode"`
+	XHTTPExtra    json.RawMessage   `json:"xhttp_extra,omitempty"`
+	ALPN          []string          `json:"alpn,omitempty"`
+	VLESSFragment map[string]string `json:"vless_fragment,omitempty"`
 }
 
 func (p *Profile) UnmarshalJSON(data []byte) error {
@@ -175,6 +176,9 @@ func (j *Job) Validate() error {
 		return ErrInvalidJob
 	}
 	if !validXHTTPExtra(p.XHTTPExtra, p.Transport, p.XHTTPMode) {
+		return ErrInvalidJob
+	}
+	if !validVLESSFragment(p.VLESSFragment, p.Protocol, p.Transport) {
 		return ErrInvalidJob
 	}
 	ip, err := netip.ParseAddr(j.IP)
@@ -318,6 +322,11 @@ func XrayConfig(job Job, port int) (map[string]any, error) {
 		network = "xhttp"
 	}
 	stream := map[string]any{"network": network, "security": p.Security}
+	if p.VLESSFragment != nil {
+		stream["finalmask"] = map[string]any{
+			"tcp": []any{map[string]any{"type": "fragment", "settings": p.VLESSFragment}},
+		}
+	}
 	if p.Security == "reality" {
 		stream["realitySettings"] = map[string]any{"show": false, "serverName": p.ServerName, "fingerprint": p.Fingerprint, "password": p.PublicKey, "shortId": p.ShortID}
 	} else {

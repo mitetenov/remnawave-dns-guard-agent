@@ -115,6 +115,10 @@ Pure config tests include Firefox + XHTTP packet-up + GET/header upload
 extra + `h2,http/1.1`, using synthetic credentials and addresses. TLS certificate
 verification remains enabled.
 
+Agent **1.8.0+** supports VLESS TCP/RAW ClientHello fragmentation. The optional
+`vless_fragment` profile field carries `packets: "tlshello"`, `length` and
+`delay` into the target outbound's Xray `streamSettings.finalmask.tcp`.
+
 ## Hysteria2
 
 Агент **1.6.0+** проверяет Hysteria2 через закреплённый Xray v26.10.21.
